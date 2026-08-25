@@ -112,7 +112,6 @@ input_frequency() {
 input_servers
 input_frequency
 
-# Создаём каталог
 mkdir -p /opt/etc/vpsmonitor-ui
 
 # Генерация скрипта сбора
@@ -176,7 +175,7 @@ EOF
 
 generate_collect_script
 
-# Генерация веб-сервера
+# Генерация веб-сервера (Python)
 cat > /opt/etc/vpsmonitor-ui/vpsmonitor.py << 'EOF'
 #!/opt/bin/python3
 import http.server
@@ -353,6 +352,7 @@ class StatsHandler(http.server.BaseHTTPRequestHandler):
     <title>AWG 2.0 VPS Monitor – WebUI</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🌍</text></svg>">
     <style>
+        /* ---- CSS (полный, как в эталонной версии) ---- */
         :root {
             --bg-body: #0d1117;
             --bg-container: rgba(22, 27, 34, 0.85);
@@ -658,7 +658,7 @@ class StatsHandler(http.server.BaseHTTPRequestHandler):
         .status-msg.error { color: #f85149; }
         .status-msg.success { color: #3fb950; }
 
-        /* Модальное окно */
+        /* Модальные окна */
         .modal {
             display: none;
             position: fixed;
@@ -784,7 +784,7 @@ class StatsHandler(http.server.BaseHTTPRequestHandler):
     </div>
 </div>
 
-<!-- Модальное окно помощи -->
+<!-- Модальные окна -->
 <div class="modal" id="helpModal">
     <div class="modal-content">
         <button class="modal-close" id="closeHelp">&times;</button>
@@ -809,7 +809,6 @@ class StatsHandler(http.server.BaseHTTPRequestHandler):
     </div>
 </div>
 
-<!-- Модальное окно управления -->
 <div class="modal" id="configModal">
     <div class="modal-content">
         <button class="modal-close" id="closeConfig">&times;</button>
@@ -861,7 +860,7 @@ class StatsHandler(http.server.BaseHTTPRequestHandler):
         if (e.target === configModal) configModal.classList.remove('show');
     });
 
-    // ---- Копирование текста ----
+    // ---- Копирование ----
     function copyText(el) {
         const text = el.textContent.trim();
         navigator.clipboard.writeText(text).then(() => {
@@ -916,7 +915,6 @@ class StatsHandler(http.server.BaseHTTPRequestHandler):
                 }
             }
         }
-        // Обработчик клика для сворачивания/разворачивания
         container.addEventListener('click', function(e) {
             const card = e.target.closest('.server-card');
             if (!card) return;
@@ -1073,22 +1071,58 @@ sed -i "s/__WEB_PORT__/$WEB_PORT/g" /opt/etc/vpsmonitor-ui/vpsmonitor.py
 chmod +x /opt/etc/vpsmonitor-ui/vpsmonitor.py
 dos2unix /opt/etc/vpsmonitor-ui/vpsmonitor.py
 
-# Init-скрипт
+# ---- Init-скрипт (финальный, рабочий) ----
 cat > /opt/etc/init.d/S99vpsmonitor << 'EOF'
 #!/bin/sh
+
+# Определяем пути к nohup и sh
+NOHUP=$(command -v nohup)
+[ -z "$NOHUP" ] && [ -x /opt/bin/nohup ] && NOHUP=/opt/bin/nohup
+[ -z "$NOHUP" ] && [ -x /usr/bin/nohup ] && NOHUP=/usr/bin/nohup
+
+SH=$(command -v sh)
+[ -z "$SH" ] && SH=/opt/bin/sh
+
 start() {
-    /opt/etc/vpsmonitor-ui/vpsmonitor.py &
+    PID=$(ps | grep -v grep | grep vpsmonitor.py | awk '{print $1}')
+    [ -n "$PID" ] && kill $PID 2>/dev/null && sleep 1
+
+    if [ -n "$NOHUP" ]; then
+        $NOHUP $SH -c "/opt/bin/python3 /opt/etc/vpsmonitor-ui/vpsmonitor.py" < /dev/null > /dev/null 2>&1 &
+    else
+        $SH -c "/opt/bin/python3 /opt/etc/vpsmonitor-ui/vpsmonitor.py < /dev/null > /dev/null 2>&1 &" &
+    fi
+
+    sleep 2
+    if ps | grep -v grep | grep vpsmonitor.py > /dev/null; then
+        echo "Server started"
+    else
+        echo "Server failed to start"
+    fi
 }
+
 stop() {
     PID=$(ps | grep -v grep | grep vpsmonitor.py | awk '{print $1}')
     if [ -n "$PID" ]; then
         kill $PID
+        echo "Server stopped"
+    else
+        echo "Server not running"
     fi
 }
+
 case "$1" in
     start) start ;;
     stop) stop ;;
-    *) echo "Usage: $0 {start|stop}" ;;
+    restart) stop; sleep 1; start ;;
+    status)
+        if ps | grep -v grep | grep vpsmonitor.py > /dev/null; then
+            echo "Server is running"
+        else
+            echo "Server is not running"
+        fi
+        ;;
+    *) echo "Usage: $0 {start|stop|restart|status}" ;;
 esac
 EOF
 
@@ -1135,6 +1169,7 @@ echo "  /opt/etc/init.d/S99vpsmonitor start"
 echo ""
 echo "Остановка: /opt/etc/init.d/S99vpsmonitor stop"
 echo "Запуск: /opt/etc/init.d/S99vpsmonitor start"
+echo "Статус: /opt/etc/init.d/S99vpsmonitor status"
 echo ""
 echo -e "${YELLOW}Пароли SSH хранятся в открытом виде в /opt/etc/vpsmonitor-ui/vpsmonitor.sh${NC}"
 echo "Рекомендуется: chmod 600 /opt/etc/vpsmonitor-ui/vpsmonitor.sh"
