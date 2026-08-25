@@ -11,6 +11,8 @@
 
 ![AWG 2.0 VPS Monitor – WebUI](webui.png)
 
+![AWG 2.0 VPS Monitor – WebUI](webui_history.png)
+
 ---
 
 ## Содержание
