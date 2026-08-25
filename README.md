@@ -47,7 +47,7 @@
 Подключитесь к роутеру по SSH и выполните:
 
 ```bash
-curl -L -o install.sh https://raw.githubusercontent.com/romaca/vpsmonitor-ui/main/install.sh
+curl -L -o install.sh https://raw.githubusercontent.com/romaca4/vpsmonitor-ui/main/install.sh
 chmod +x install.sh
 ./install.sh
 ```
@@ -99,7 +99,7 @@ chmod 600 /opt/etc/vpsmonitor-ui/vpsmonitor.sh
 ## Удаление
 ### Автоматическое удаление
 ```bash
-curl -L -o uninstall.sh https://raw.githubusercontent.com/romaca/vpsmonitor-ui/main/uninstall.sh
+curl -L -o uninstall.sh https://raw.githubusercontent.com/romaca4/vpsmonitor-ui/main/uninstall.sh
 chmod +x uninstall.sh
 ./uninstall.sh
 ```
