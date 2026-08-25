@@ -72,7 +72,8 @@ chmod 600 /opt/etc/vpsmonitor-ui/vpsmonitor.sh
 |:---------:|:--------:|
 | Остановка веб-сервера | `/opt/etc/init.d/S99vpsmonitor stop` |
 Запуск веб-сервера | `/opt/etc/init.d/S99vpsmonitor start` |
-Перезапуск веб-сервера | `/opt/etc/init.d/S99vpsmonitor stop && /opt/etc/init.d/S99vpsmonitor start` |
+Перезапуск веб-сервера | `/opt/etc/init.d/S99vpsmonitor restart` |
+Статус веб-сервера | `/opt/etc/init.d/S99vpsmonitor status` |
 Ручной запуск сбора статистики | `/opt/etc/vpsmonitor-ui/vpsmonitor.sh` |
 
 ### Изменение конфигурации серверов
