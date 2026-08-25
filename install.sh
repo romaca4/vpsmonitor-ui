@@ -1,6 +1,6 @@
 #!/bin/sh
 # VPSMonitor Installer for Keenetic Entware
-# GitHub: https://github.com/romaca/vpsmonitor-ui
+# GitHub: https://github.com/romaca4/vpsmonitor-ui
 
 set +e
 
@@ -779,7 +779,7 @@ class StatsHandler(http.server.BaseHTTPRequestHandler):
             <button class="btn-icon" id="configBtn">⚙️ Управление</button>
             <button class="btn-icon theme-toggle-icon" id="themeToggle">🌙</button>
         </div>
-        <div>&copy; 2026 <a href="https://github.com/romaca/vpsmonitor-ui" target="_blank">romaca/vpsmonitor-ui</a></div>
+        <div>&copy; 2026 <a href="https://github.com/romaca4/vpsmonitor-ui" target="_blank">romaca4/vpsmonitor-ui</a></div>
         <div class="version">AWG 2.0 VPS Monitor (WebUI) · версия 1.0.0</div>
     </div>
 </div>
@@ -803,7 +803,7 @@ class StatsHandler(http.server.BaseHTTPRequestHandler):
         </details>
         <details>
             <summary>🔒 Конфиденциальность</summary>
-            <p>Ваши IP-адреса, домены и пароли <strong>не передаются никуда</strong> и хранятся исключительно локально на вашем роутере. Исходный код проекта открыт, вы можете изучить его на <a href="https://github.com/romaca/vpsmonitor-ui" target="_blank">GitHub</a>.</p>
+            <p>Ваши IP-адреса, домены и пароли <strong>не передаются никуда</strong> и хранятся исключительно локально на вашем роутере. Исходный код проекта открыт, вы можете изучить его на <a href="https://github.com/romaca4/vpsmonitor-ui" target="_blank">GitHub</a>.</p>
         </details>
         <button class="btn btn-primary" id="closeHelpBtn" style="margin-top:15px;">Закрыть</button>
     </div>
