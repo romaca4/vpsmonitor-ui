@@ -114,6 +114,7 @@ input_frequency
 
 mkdir -p /opt/etc/vpsmonitor-ui
 
+# Генерация скрипта сбора
 generate_collect_script() {
     cat > /opt/etc/vpsmonitor-ui/vpsmonitor.sh << EOF
 #!/bin/sh
@@ -174,6 +175,7 @@ EOF
 
 generate_collect_script
 
+# Генерация веб-сервера (Python)
 cat > /opt/etc/vpsmonitor-ui/vpsmonitor.py << 'EOF'
 #!/opt/bin/python3
 import http.server
@@ -350,7 +352,7 @@ class StatsHandler(http.server.BaseHTTPRequestHandler):
     <title>AWG 2.0 VPS Monitor – WebUI</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🌍</text></svg>">
     <style>
-        /* все стили как в эталоне */
+        /* ---- CSS (полный, как в эталонной версии) ---- */
         :root {
             --bg-body: #0d1117;
             --bg-container: rgba(22, 27, 34, 0.85);
@@ -396,71 +398,368 @@ class StatsHandler(http.server.BaseHTTPRequestHandler):
             --globe-filter: none;
         }
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { background: var(--bg-body); color: var(--text-secondary); font-family: 'Segoe UI', sans-serif; padding: 20px; display: flex; justify-content: center; min-height: 100vh; transition: background 0.3s, color 0.3s; margin: 0; }
-        .container { max-width: 1200px; width: 100%; background: var(--bg-container); backdrop-filter: blur(8px); border-radius: 24px; padding: 30px 30px 20px; box-shadow: 0 8px 32px rgba(0,0,0,0.3); border: 1px solid var(--border-color); transition: background 0.3s, border-color 0.3s; }
-        header { text-align: center; padding: 10px 0 15px 0; border-bottom: 2px solid var(--border-color); margin-bottom: 20px; transition: border-color 0.3s; }
-        header .globe { font-size: 3.2rem; display: block; margin-bottom: 4px; animation: pulse 2s infinite; filter: var(--globe-filter); }
-        @keyframes pulse { 0% { transform: scale(1); } 50% { transform: scale(1.1); } 100% { transform: scale(1); } }
-        header h1 { font-size: 2.4rem; font-weight: 300; letter-spacing: 2px; color: var(--text-primary); text-shadow: 0 2px 10px rgba(88,166,255,0.1); transition: color 0.3s; }
-        header h1 span { color: var(--accent); font-weight: 600; }
-        .subtitle { font-size: 0.95rem; color: var(--text-muted); margin-top: 4px; letter-spacing: 1px; }
-        .server-card { background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 16px; padding: 20px; margin-bottom: 24px; transition: background 0.3s, border-color 0.3s, box-shadow 0.3s, transform 0.25s ease; box-shadow: var(--card-shadow); cursor: pointer; }
-        .server-card:hover { border-color: var(--accent); transform: translateY(-2px); box-shadow: 0 6px 20px rgba(88,166,255,0.12); }
-        .server-header { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; margin-bottom: 6px; }
-        .server-status { display: inline-block; width: 12px; height: 12px; border-radius: 50%; margin-right: 8px; vertical-align: middle; }
+        body {
+            background: var(--bg-body);
+            color: var(--text-secondary);
+            font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, Roboto, Oxygen, Ubuntu, sans-serif;
+            padding: 20px;
+            display: flex;
+            justify-content: center;
+            min-height: 100vh;
+            transition: background 0.3s, color 0.3s;
+            margin: 0;
+        }
+        .container {
+            max-width: 1200px;
+            width: 100%;
+            background: var(--bg-container);
+            backdrop-filter: blur(8px);
+            border-radius: 24px;
+            padding: 30px 30px 20px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+            border: 1px solid var(--border-color);
+            transition: background 0.3s, border-color 0.3s;
+        }
+        header {
+            text-align: center;
+            padding: 10px 0 15px 0;
+            border-bottom: 2px solid var(--border-color);
+            margin-bottom: 20px;
+            transition: border-color 0.3s;
+        }
+        header .globe {
+            font-size: 3.2rem;
+            display: block;
+            margin-bottom: 4px;
+            animation: pulse 2s infinite;
+            filter: var(--globe-filter);
+        }
+        @keyframes pulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.1); }
+            100% { transform: scale(1); }
+        }
+        header h1 {
+            font-size: 2.4rem;
+            font-weight: 300;
+            letter-spacing: 2px;
+            color: var(--text-primary);
+            text-shadow: 0 2px 10px rgba(88,166,255,0.1);
+            transition: color 0.3s;
+        }
+        header h1 span {
+            color: var(--accent);
+            font-weight: 600;
+        }
+        .subtitle {
+            font-size: 0.95rem;
+            color: var(--text-muted);
+            margin-top: 4px;
+            letter-spacing: 1px;
+        }
+        .server-card {
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 16px;
+            padding: 20px;
+            margin-bottom: 24px;
+            transition: background 0.3s, border-color 0.3s, box-shadow 0.3s, transform 0.25s ease;
+            box-shadow: var(--card-shadow);
+            cursor: pointer;
+        }
+        .server-card:hover {
+            border-color: var(--accent);
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(88,166,255,0.12);
+        }
+        .server-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            margin-bottom: 6px;
+        }
+        .server-status {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 8px;
+            vertical-align: middle;
+        }
         .server-status.ok { background: #3fb950; }
         .server-status.fail { background: #f85149; }
         .server-status.unknown { background: #8b949e; }
-        .server-name { font-size: 1.5rem; font-weight: 500; color: var(--text-primary); cursor: pointer; padding: 4px 10px; border-radius: 6px; transition: 0.2s; display: inline-block; background: var(--pre-bg); border: 1px solid transparent; pointer-events: auto; }
-        .server-name:hover { background: var(--btn-bg); border-color: var(--border-color); }
-        .server-name-input { font-size: 1.5rem; background: var(--input-bg); border: 1px solid var(--input-focus); color: var(--text-primary); padding: 4px 10px; border-radius: 6px; outline: none; font-weight: 500; width: auto; min-width: 180px; transition: background 0.3s, border-color 0.3s, color 0.3s; }
-        .server-meta { color: var(--text-muted); font-size: 0.9rem; margin-top: 6px; display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; }
+        .server-name {
+            font-size: 1.5rem;
+            font-weight: 500;
+            color: var(--text-primary);
+            cursor: pointer;
+            padding: 4px 10px;
+            border-radius: 6px;
+            transition: 0.2s;
+            display: inline-block;
+            background: var(--pre-bg);
+            border: 1px solid transparent;
+            pointer-events: auto;
+        }
+        .server-name:hover {
+            background: var(--btn-bg);
+            border-color: var(--border-color);
+        }
+        .server-name-input {
+            font-size: 1.5rem;
+            background: var(--input-bg);
+            border: 1px solid var(--input-focus);
+            color: var(--text-primary);
+            padding: 4px 10px;
+            border-radius: 6px;
+            outline: none;
+            font-weight: 500;
+            width: auto;
+            min-width: 180px;
+            transition: background 0.3s, border-color 0.3s, color 0.3s;
+        }
+        .server-meta {
+            color: var(--text-muted);
+            font-size: 0.9rem;
+            margin-top: 6px;
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: flex-end;
+            align-items: center;
+        }
         .server-meta .time { color: var(--text-muted); }
-        .action-btn { background: none; border: 1px solid var(--border-color); color: var(--text-muted); cursor: pointer; font-size: 0.8rem; padding: 2px 10px; border-radius: 12px; transition: 0.2s; background: var(--btn-bg); }
-        .action-btn:hover { background: var(--btn-hover); color: var(--text-primary); }
-        pre { background: var(--pre-bg); border: 1px solid var(--pre-border); border-radius: 10px; padding: 14px; font-size: 0.85rem; overflow-x: auto; white-space: pre-wrap; word-break: break-word; margin: 14px 0 10px 0; font-family: 'JetBrains Mono', 'Fira Code', monospace; color: var(--text-secondary); line-height: 1.5; transition: background 0.3s, border-color 0.3s, color 0.3s; }
-        .server-content { transition: max-height 0.3s ease, opacity 0.3s; overflow: hidden; }
-        .server-content.collapsed { max-height: 0 !important; opacity: 0; padding: 0 !important; margin: 0 !important; }
-        .server-content.collapsed pre, .server-content.collapsed .history-list { pointer-events: none; }
-        .history-list { display: none; margin-top: 12px; background: var(--pre-bg); border-radius: 10px; border: 1px solid var(--pre-border); padding: 6px 0; }
+        .action-btn {
+            background: none;
+            border: 1px solid var(--border-color);
+            color: var(--text-muted);
+            cursor: pointer;
+            font-size: 0.8rem;
+            padding: 2px 10px;
+            border-radius: 12px;
+            transition: 0.2s;
+            background: var(--btn-bg);
+        }
+        .action-btn:hover {
+            background: var(--btn-hover);
+            color: var(--text-primary);
+        }
+        pre {
+            background: var(--pre-bg);
+            border: 1px solid var(--pre-border);
+            border-radius: 10px;
+            padding: 14px;
+            font-size: 0.85rem;
+            overflow-x: auto;
+            white-space: pre-wrap;
+            word-break: break-word;
+            margin: 14px 0 10px 0;
+            font-family: 'JetBrains Mono', 'Fira Code', monospace;
+            color: var(--text-secondary);
+            line-height: 1.5;
+            transition: background 0.3s, border-color 0.3s, color 0.3s;
+        }
+        .server-content {
+            transition: max-height 0.3s ease, opacity 0.3s;
+            overflow: hidden;
+        }
+        .server-content.collapsed {
+            max-height: 0 !important;
+            opacity: 0;
+            padding: 0 !important;
+            margin: 0 !important;
+        }
+        .server-content.collapsed pre,
+        .server-content.collapsed .history-list {
+            pointer-events: none;
+        }
+        .history-list {
+            display: none;
+            margin-top: 12px;
+            background: var(--pre-bg);
+            border-radius: 10px;
+            border: 1px solid var(--pre-border);
+            padding: 6px 0;
+        }
         .history-list.show { display: block; }
-        .history-item { padding: 8px 16px; border-bottom: 1px solid var(--pre-border); cursor: pointer; font-size: 0.9rem; display: flex; justify-content: space-between; align-items: center; transition: 0.15s; color: var(--text-secondary); }
+        .history-item {
+            padding: 8px 16px;
+            border-bottom: 1px solid var(--pre-border);
+            cursor: pointer;
+            font-size: 0.9rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            transition: 0.15s;
+            color: var(--text-secondary);
+        }
         .history-item:last-child { border-bottom: none; }
         .history-item:hover { background: var(--btn-bg); }
         .history-item .date { color: var(--text-muted); margin-right: 12px; }
-        .history-content { display: none; margin: 8px 16px 16px 16px; background: var(--pre-bg); border-left: 3px solid var(--accent); padding: 10px 16px; border-radius: 6px; font-size: 0.8rem; white-space: pre-wrap; word-break: break-word; color: var(--text-secondary); }
+        .history-content {
+            display: none;
+            margin: 8px 16px 16px 16px;
+            background: var(--pre-bg);
+            border-left: 3px solid var(--accent);
+            padding: 10px 16px;
+            border-radius: 6px;
+            font-size: 0.8rem;
+            white-space: pre-wrap;
+            word-break: break-word;
+            color: var(--text-secondary);
+        }
         .history-content.show { display: block; }
-        .footer { margin-top: 40px; text-align: center; color: var(--text-muted); font-size: 0.8rem; border-top: 1px solid var(--footer-border); padding-top: 18px; transition: border-color 0.3s, color 0.3s; }
-        .footer .footer-controls { display: flex; justify-content: center; gap: 10px; margin-bottom: 10px; }
-        .footer .footer-controls .btn-icon { background: none; border: 1px solid var(--border-color); border-radius: 30px; padding: 3px 10px; cursor: pointer; font-size: 0.8rem; color: var(--text-secondary); transition: 0.2s; background: var(--btn-bg); line-height: 1.4; }
-        .footer .footer-controls .btn-icon:hover { background: var(--btn-hover); border-color: var(--accent); }
-        .footer .footer-controls .theme-toggle-icon { font-size: 1rem; padding: 2px 8px; }
+        .footer {
+            margin-top: 40px;
+            text-align: center;
+            color: var(--text-muted);
+            font-size: 0.8rem;
+            border-top: 1px solid var(--footer-border);
+            padding-top: 18px;
+            transition: border-color 0.3s, color 0.3s;
+        }
+        .footer .footer-controls {
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+        .footer .footer-controls .btn-icon {
+            background: none;
+            border: 1px solid var(--border-color);
+            border-radius: 30px;
+            padding: 3px 10px;
+            cursor: pointer;
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            transition: 0.2s;
+            background: var(--btn-bg);
+            line-height: 1.4;
+        }
+        .footer .footer-controls .btn-icon:hover {
+            background: var(--btn-hover);
+            border-color: var(--accent);
+        }
+        .footer .footer-controls .theme-toggle-icon {
+            font-size: 1rem;
+            padding: 2px 8px;
+        }
         .footer a { color: var(--accent); text-decoration: none; transition: 0.2s; }
         .footer a:hover { text-decoration: underline; color: var(--accent-hover); }
         .footer .version { margin-top: 6px; font-size: 0.75rem; color: var(--text-muted); }
-        .status-msg { text-align: center; margin: 10px 0; color: var(--text-muted); font-size: 0.9rem; min-height: 1.5em; }
+        .status-msg {
+            text-align: center;
+            margin: 10px 0;
+            color: var(--text-muted);
+            font-size: 0.9rem;
+            min-height: 1.5em;
+        }
         .status-msg.error { color: #f85149; }
         .status-msg.success { color: #3fb950; }
 
         /* Модальные окна */
-        .modal { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6); justify-content: center; align-items: center; }
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0; top: 0;
+            width: 100%; height: 100%;
+            background: rgba(0,0,0,0.6);
+            justify-content: center;
+            align-items: center;
+        }
         .modal.show { display: flex; }
-        .modal-content { background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 16px; padding: 25px; max-width: 700px; width: 90%; max-height: 80vh; overflow-y: auto; color: var(--text-secondary); }
+        .modal-content {
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 16px;
+            padding: 25px;
+            max-width: 700px;
+            width: 90%;
+            max-height: 80vh;
+            overflow-y: auto;
+            color: var(--text-secondary);
+        }
         .modal-content h2 { color: var(--text-primary); margin-bottom: 15px; }
         .modal-content p { margin: 10px 0; line-height: 1.6; }
-        .modal-content code { background: var(--pre-bg); padding: 2px 6px; border-radius: 4px; font-family: monospace; color: var(--accent); }
-        .modal-content .code-block { background: var(--pre-bg); padding: 10px 14px; border-radius: 6px; border: 1px solid var(--pre-border); font-family: monospace; font-size: 0.9rem; white-space: pre-wrap; word-break: break-word; cursor: pointer; transition: 0.2s; margin: 8px 0; }
-        .modal-content .code-block:hover { border-color: var(--accent); }
-        .modal-content details { margin: 12px 0; border: 1px solid var(--border-color); border-radius: 8px; padding: 8px 12px; background: var(--btn-bg); }
-        .modal-content summary { cursor: pointer; font-weight: 500; color: var(--text-primary); }
+        .modal-content code {
+            background: var(--pre-bg);
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: monospace;
+            color: var(--accent);
+        }
+        .modal-content .code-block {
+            background: var(--pre-bg);
+            padding: 10px 14px;
+            border-radius: 6px;
+            border: 1px solid var(--pre-border);
+            font-family: monospace;
+            font-size: 0.9rem;
+            white-space: pre-wrap;
+            word-break: break-word;
+            cursor: pointer;
+            transition: 0.2s;
+            margin: 8px 0;
+        }
+        .modal-content .code-block:hover {
+            border-color: var(--accent);
+        }
+        .modal-content details {
+            margin: 12px 0;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 8px 12px;
+            background: var(--btn-bg);
+        }
+        .modal-content summary {
+            cursor: pointer;
+            font-weight: 500;
+            color: var(--text-primary);
+        }
         .modal-content summary:hover { color: var(--accent); }
-        .modal-close { float: right; background: none; border: none; color: var(--text-muted); font-size: 1.5rem; cursor: pointer; }
+        .modal-close {
+            float: right;
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            font-size: 1.5rem;
+            cursor: pointer;
+        }
         .modal-close:hover { color: var(--text-primary); }
-        .modal .btn { background: var(--btn-bg); border: 1px solid var(--border-color); color: var(--text-secondary); padding: 6px 14px; border-radius: 20px; cursor: pointer; transition: 0.2s; font-size: 0.9rem; }
-        .modal .btn:hover { background: var(--btn-hover); border-color: var(--accent); }
-        .modal .btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-        .modal .btn-primary:hover { background: var(--accent-hover); }
-        @media (max-width: 600px) { body { padding: 12px; } .container { padding: 16px; } header h1 { font-size: 1.6rem; } .server-name { font-size: 1.2rem; } .server-name-input { font-size: 1.2rem; min-width: 120px; } pre { font-size: 0.75rem; padding: 10px; } .footer { font-size: 0.7rem; } .footer .footer-controls { flex-wrap: wrap; } }
+        .modal .btn {
+            background: var(--btn-bg);
+            border: 1px solid var(--border-color);
+            color: var(--text-secondary);
+            padding: 6px 14px;
+            border-radius: 20px;
+            cursor: pointer;
+            transition: 0.2s;
+            font-size: 0.9rem;
+        }
+        .modal .btn:hover {
+            background: var(--btn-hover);
+            border-color: var(--accent);
+        }
+        .modal .btn-primary {
+            background: var(--accent);
+            border-color: var(--accent);
+            color: #fff;
+        }
+        .modal .btn-primary:hover {
+            background: var(--accent-hover);
+        }
+        @media (max-width: 600px) {
+            body { padding: 12px; }
+            .container { padding: 16px; }
+            header h1 { font-size: 1.6rem; }
+            .server-name { font-size: 1.2rem; }
+            .server-name-input { font-size: 1.2rem; min-width: 120px; }
+            pre { font-size: 0.75rem; padding: 10px; }
+            .footer { font-size: 0.7rem; }
+            .footer .footer-controls { flex-wrap: wrap; }
+        }
     </style>
 </head>
 <body>
@@ -767,32 +1066,70 @@ if __name__ == '__main__':
     server.serve_forever()
 EOF
 
+# Подставляем порт
 sed -i "s/__WEB_PORT__/$WEB_PORT/g" /opt/etc/vpsmonitor-ui/vpsmonitor.py
 chmod +x /opt/etc/vpsmonitor-ui/vpsmonitor.py
 dos2unix /opt/etc/vpsmonitor-ui/vpsmonitor.py
 
-# Init-скрипт с nohup
+# ---- Init-скрипт (финальный, рабочий) ----
 cat > /opt/etc/init.d/S99vpsmonitor << 'EOF'
 #!/bin/sh
+
+# Определяем пути к nohup и sh
+NOHUP=$(command -v nohup)
+[ -z "$NOHUP" ] && [ -x /opt/bin/nohup ] && NOHUP=/opt/bin/nohup
+[ -z "$NOHUP" ] && [ -x /usr/bin/nohup ] && NOHUP=/usr/bin/nohup
+
+SH=$(command -v sh)
+[ -z "$SH" ] && SH=/opt/bin/sh
+
 start() {
-    nohup /opt/etc/vpsmonitor-ui/vpsmonitor.py > /dev/null 2>&1 &
+    PID=$(ps | grep -v grep | grep vpsmonitor.py | awk '{print $1}')
+    [ -n "$PID" ] && kill $PID 2>/dev/null && sleep 1
+
+    if [ -n "$NOHUP" ]; then
+        $NOHUP $SH -c "/opt/bin/python3 /opt/etc/vpsmonitor-ui/vpsmonitor.py" < /dev/null > /dev/null 2>&1 &
+    else
+        $SH -c "/opt/bin/python3 /opt/etc/vpsmonitor-ui/vpsmonitor.py < /dev/null > /dev/null 2>&1 &" &
+    fi
+
+    sleep 2
+    if ps | grep -v grep | grep vpsmonitor.py > /dev/null; then
+        echo "Server started"
+    else
+        echo "Server failed to start"
+    fi
 }
+
 stop() {
     PID=$(ps | grep -v grep | grep vpsmonitor.py | awk '{print $1}')
     if [ -n "$PID" ]; then
         kill $PID
+        echo "Server stopped"
+    else
+        echo "Server not running"
     fi
 }
+
 case "$1" in
     start) start ;;
     stop) stop ;;
-    *) echo "Usage: $0 {start|stop}" ;;
+    restart) stop; sleep 1; start ;;
+    status)
+        if ps | grep -v grep | grep vpsmonitor.py > /dev/null; then
+            echo "Server is running"
+        else
+            echo "Server is not running"
+        fi
+        ;;
+    *) echo "Usage: $0 {start|stop|restart|status}" ;;
 esac
 EOF
 
 chmod +x /opt/etc/init.d/S99vpsmonitor
 dos2unix /opt/etc/init.d/S99vpsmonitor
 
+# Автозапуск через rc.local
 RC_LOCAL="/opt/etc/init.d/rc.local"
 if [ -f "$RC_LOCAL" ]; then
     if ! grep -q "S99vpsmonitor" "$RC_LOCAL"; then
@@ -804,16 +1141,19 @@ else
     chmod +x "$RC_LOCAL"
 fi
 
+# Настройка cron
 echo -e "${GREEN}Настройка cron...${NC}"
 (crontab -l 2>/dev/null | grep -v vpsmonitor.sh | crontab -) 2>/dev/null || true
 echo "$CRON_LINES" | while read -r line; do
     [ -n "$line" ] && (crontab -l 2>/dev/null; echo "$line /opt/etc/vpsmonitor-ui/vpsmonitor.sh") | crontab -
 done
 
+# Запуск веб-сервера
 echo -e "${GREEN}Запуск веб-сервера...${NC}"
 /opt/etc/init.d/S99vpsmonitor stop 2>/dev/null || true
 /opt/etc/init.d/S99vpsmonitor start
 
+# Запуск первичного сбора
 echo -e "${YELLOW}Запуск первичного сбора статистики в фоне...${NC}"
 /opt/etc/vpsmonitor-ui/vpsmonitor.sh > /dev/null 2>&1 &
 
@@ -829,6 +1169,7 @@ echo "  /opt/etc/init.d/S99vpsmonitor start"
 echo ""
 echo "Остановка: /opt/etc/init.d/S99vpsmonitor stop"
 echo "Запуск: /opt/etc/init.d/S99vpsmonitor start"
+echo "Статус: /opt/etc/init.d/S99vpsmonitor status"
 echo ""
 echo -e "${YELLOW}Пароли SSH хранятся в открытом виде в /opt/etc/vpsmonitor-ui/vpsmonitor.sh${NC}"
 echo "Рекомендуется: chmod 600 /opt/etc/vpsmonitor-ui/vpsmonitor.sh"
