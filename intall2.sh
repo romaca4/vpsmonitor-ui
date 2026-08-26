@@ -163,7 +163,6 @@ collect() {
     " > "$outfile" 2>&1
     if [ -s "$outfile" ]; then
         echo "OK: $server"
-        # Удаляем маркер ошибки, если был
         rm -f "$STATS_DIR/error_${server}.txt"
     else
         echo "FAIL: $server (пустой вывод)"
@@ -227,11 +226,8 @@ def load_schedule():
     return "Неизвестно"
 
 def get_next_run(schedule_desc):
-    # Парсим описание и вычисляем следующее время запуска
     now = datetime.now()
-    # Простой парсинг для основных вариантов
     if "1 раз в сутки" in schedule_desc:
-        # 03:00
         next_run = now.replace(hour=3, minute=0, second=0, microsecond=0)
         if next_run <= now:
             next_run += timedelta(days=1)
@@ -242,7 +238,6 @@ def get_next_run(schedule_desc):
             dt = now.replace(hour=h, minute=m, second=0, microsecond=0)
             if dt > now:
                 return dt.strftime('%d.%m.%Y в %H:%M')
-        # если все прошедшие, берём первое на завтра
         dt = now.replace(hour=6, minute=0, second=0, microsecond=0) + timedelta(days=1)
         return dt.strftime('%d.%m.%Y в %H:%M')
     elif "3 раза в сутки" in schedule_desc:
@@ -262,15 +257,13 @@ def get_next_run(schedule_desc):
         dt = now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
         return dt.strftime('%d.%m.%Y в %H:%M')
     elif "1 раз в неделю" in schedule_desc:
-        # воскресенье 03:00
-        days_ahead = 6 - now.weekday()  # 6 = воскресенье
+        days_ahead = 6 - now.weekday()
         if days_ahead <= 0:
             days_ahead += 7
         next_run = now.replace(hour=3, minute=0, second=0, microsecond=0) + timedelta(days=days_ahead)
         return next_run.strftime('%d.%m.%Y в %H:%M')
     elif "3 раза в неделю" in schedule_desc:
-        # пн, ср, пт в 03:00
-        weekdays = [0,2,4]  # пн, ср, пт
+        weekdays = [0,2,4]
         for wd in weekdays:
             days_ahead = wd - now.weekday()
             if days_ahead < 0:
@@ -309,6 +302,8 @@ class StatsHandler(http.server.BaseHTTPRequestHandler):
             self.send_json(self.get_schedule())
         elif path == '/api/cleanup':
             self.cleanup_history()
+        elif path == '/api/cleanup_server':
+            self.cleanup_server_history()
         else:
             self.send_error(404)
 
@@ -317,6 +312,8 @@ class StatsHandler(http.server.BaseHTTPRequestHandler):
         path = parsed.path
         if path == '/api/setname':
             self.set_name()
+        elif path == '/api/cleanup_server':
+            self.cleanup_server_history()
         else:
             self.send_error(404)
 
@@ -336,10 +333,9 @@ class StatsHandler(http.server.BaseHTTPRequestHandler):
     def get_schedule(self):
         desc = load_schedule()
         next_run = get_next_run(desc)
-        return {'description': desc, 'next_run': next_run}
+        return {'description': desc, 'next_run': next_run, 'cron_file': '/opt/etc/cron.d/vpsmonitor'}
 
     def cleanup_history(self):
-        # Удаляем все файлы статистики, кроме последнего для каждого сервера
         try:
             files = glob.glob(os.path.join(STATS_DIR, 'stats_*.txt'))
             servers = {}
@@ -350,12 +346,29 @@ class StatsHandler(http.server.BaseHTTPRequestHandler):
                     domain = '_'.join(parts[1:-2])
                     servers.setdefault(domain, []).append(f)
             for domain, flist in servers.items():
-                # сортируем по времени модификации (новые сверху)
                 flist.sort(key=lambda x: os.path.getmtime(x), reverse=True)
-                # оставляем первый (самый новый)
                 for f in flist[1:]:
                     os.remove(f)
             self.send_json({'status': 'ok', 'message': 'История очищена'})
+        except Exception as e:
+            self.send_json({'status': 'error', 'message': str(e)})
+
+    def cleanup_server_history(self):
+        try:
+            length = int(self.headers.get('Content-Length', 0))
+            data = json.loads(self.rfile.read(length).decode('utf-8'))
+            domain = data.get('domain')
+            if not domain:
+                self.send_json({'status': 'error', 'message': 'Не указан сервер'})
+                return
+            files = glob.glob(os.path.join(STATS_DIR, f'stats_{domain}_*.txt'))
+            if not files:
+                self.send_json({'status': 'ok', 'message': 'Нет файлов для очистки'})
+                return
+            files.sort(key=lambda x: os.path.getmtime(x), reverse=True)
+            for f in files[1:]:
+                os.remove(f)
+            self.send_json({'status': 'ok', 'message': 'История сервера очищена'})
         except Exception as e:
             self.send_json({'status': 'error', 'message': str(e)})
 
@@ -405,7 +418,6 @@ class StatsHandler(http.server.BaseHTTPRequestHandler):
             except:
                 formatted = latest_ts
             display_name = names.get(domain, domain)
-            # Проверяем наличие маркера ошибки
             error_file = os.path.join(STATS_DIR, f'error_{domain}.txt')
             status = 'error' if os.path.exists(error_file) else 'ok'
             result[domain] = {
@@ -462,7 +474,6 @@ class StatsHandler(http.server.BaseHTTPRequestHandler):
         self.wfile.write(content.encode('utf-8'))
 
     def generate_html(self):
-        # Здесь HTML с обновлёнными разделами
         return '''<!DOCTYPE html>
 <html lang="ru">
 <head>
@@ -580,7 +591,8 @@ class StatsHandler(http.server.BaseHTTPRequestHandler):
             text-align: center;
             font-size: 0.9rem;
             color: var(--text-muted);
-            margin-bottom: 20px;
+            margin-top: 8px;
+            margin-bottom: 4px;
             background: var(--pre-bg);
             padding: 6px 14px;
             border-radius: 20px;
@@ -589,6 +601,12 @@ class StatsHandler(http.server.BaseHTTPRequestHandler):
             margin-right: auto;
             width: auto;
             border: 1px solid var(--pre-border);
+            cursor: pointer;
+            transition: 0.2s;
+        }
+        .schedule-info:hover {
+            border-color: var(--accent);
+            color: var(--text-primary);
         }
         .server-card {
             background: var(--card-bg);
@@ -673,6 +691,7 @@ class StatsHandler(http.server.BaseHTTPRequestHandler):
             border-radius: 12px;
             transition: 0.2s;
             background: var(--btn-bg);
+            margin-left: 6px;
         }
         .action-btn:hover {
             background: var(--btn-hover);
@@ -905,7 +924,7 @@ class StatsHandler(http.server.BaseHTTPRequestHandler):
         <div class="globe">🌍</div>
         <h1>AWG 2.0 <span>VPS Monitor</span></h1>
         <div class="subtitle">Мониторинг трафика конфигураций AWG 2.0 на VPS</div>
-        <div class="schedule-info" id="scheduleInfo">Расписание обновления: загрузка...</div>
+        <div class="schedule-info" id="scheduleInfo">Следующее обновление: загрузка...</div>
     </header>
 
     <div id="statusMsg" class="status-msg"></div>
@@ -942,7 +961,8 @@ class StatsHandler(http.server.BaseHTTPRequestHandler):
         </details>
         <details>
             <summary>🗑️ Очистка истории</summary>
-            <p>В разделе <strong>«Управление»</strong> доступна кнопка <strong>«Очистить историю»</strong>. Она удаляет все файлы статистики, кроме последнего для каждого сервера. Это помогает экономить место на устройстве.</p>
+            <p>Вы можете очистить историю для всех серверов сразу через раздел <strong>«Управление»</strong> или для отдельного сервера, развернув его карточку и нажав кнопку <strong>«🗑️ Очистить историю»</strong> рядом с кнопкой истории.</p>
+            <p>При очистке удаляются все файлы статистики, кроме последнего для каждого сервера. Это помогает экономить место на устройстве.</p>
         </details>
         <details>
             <summary>🔒 Конфиденциальность</summary>
@@ -978,9 +998,21 @@ class StatsHandler(http.server.BaseHTTPRequestHandler):
         <hr style="border-color:var(--border-color); margin:15px 0;">
         <p><strong>Настройки:</strong></p>
         <button class="btn" id="themeToggleModal" style="margin-right:10px;">🌙 Сменить тему</button>
-        <button class="btn btn-danger" id="cleanupBtn">🗑️ Очистить историю</button>
+        <button class="btn btn-danger" id="cleanupBtn">🗑️ Очистить историю (все серверы)</button>
         <p style="margin-top:15px; color:var(--text-muted);">Все пароли хранятся в открытом виде. Ограничьте доступ к SSH роутера.</p>
         <button class="btn btn-primary" id="closeConfigBtn" style="margin-top:15px;">Закрыть</button>
+    </div>
+</div>
+
+<!-- Модальное окно с подробностями расписания -->
+<div class="modal" id="scheduleModal">
+    <div class="modal-content">
+        <button class="modal-close" id="closeSchedule">&times;</button>
+        <h2>📋 Расписание обновления</h2>
+        <p id="scheduleDetail">Загрузка...</p>
+        <p style="margin-top:12px;"><strong>Расписание cron:</strong> <code id="cronFileDetail">/opt/etc/cron.d/vpsmonitor</code></p>
+        <p style="margin-top:12px; font-size:0.9rem;">Для изменения отредактируйте этот файл вручную.</p>
+        <button class="btn btn-primary" id="closeScheduleBtn" style="margin-top:15px;">Закрыть</button>
     </div>
 </div>
 
@@ -996,34 +1028,41 @@ class StatsHandler(http.server.BaseHTTPRequestHandler):
         localStorage.setItem('theme', isLight ? 'light' : 'dark');
         this.textContent = isLight ? '☀️ Сменить тему' : '🌙 Сменить тему';
     });
-    // Установить правильный текст при загрузке
     document.getElementById('themeToggleModal').textContent = currentTheme === 'light' ? '☀️ Сменить тему' : '🌙 Сменить тему';
 
     // ---- Модальные окна ----
     const helpModal = document.getElementById('helpModal');
     const configModal = document.getElementById('configModal');
+    const scheduleModal = document.getElementById('scheduleModal');
     document.getElementById('helpBtn').addEventListener('click', () => helpModal.classList.add('show'));
     document.getElementById('closeHelp').addEventListener('click', () => helpModal.classList.remove('show'));
     document.getElementById('closeHelpBtn').addEventListener('click', () => helpModal.classList.remove('show'));
     document.getElementById('configBtn').addEventListener('click', () => configModal.classList.add('show'));
     document.getElementById('closeConfig').addEventListener('click', () => configModal.classList.remove('show'));
     document.getElementById('closeConfigBtn').addEventListener('click', () => configModal.classList.remove('show'));
+    document.getElementById('closeSchedule').addEventListener('click', () => scheduleModal.classList.remove('show'));
+    document.getElementById('closeScheduleBtn').addEventListener('click', () => scheduleModal.classList.remove('show'));
     window.addEventListener('click', (e) => {
         if (e.target === helpModal) helpModal.classList.remove('show');
         if (e.target === configModal) configModal.classList.remove('show');
+        if (e.target === scheduleModal) scheduleModal.classList.remove('show');
     });
 
-    // ---- Копирование ----
-    function copyText(el) {
-        const text = el.textContent.trim();
-        navigator.clipboard.writeText(text).then(() => {
-            const orig = el.style.borderColor;
-            el.style.borderColor = '#3fb950';
-            setTimeout(() => el.style.borderColor = orig, 500);
-        }).catch(() => {});
-    }
+    // ---- Клик по плашке расписания ----
+    document.getElementById('scheduleInfo').addEventListener('click', async function() {
+        try {
+            const resp = await fetch('/api/schedule');
+            const data = await resp.json();
+            document.getElementById('scheduleDetail').textContent = 'Текущее расписание: ' + data.description + ' (следующий запуск: ' + data.next_run + ')';
+            document.getElementById('cronFileDetail').textContent = data.cron_file || '/opt/etc/cron.d/vpsmonitor';
+            scheduleModal.classList.add('show');
+        } catch(e) {
+            document.getElementById('scheduleDetail').textContent = 'Не удалось загрузить расписание';
+            scheduleModal.classList.add('show');
+        }
+    });
 
-    // ---- Очистка истории ----
+    // ---- Очистка истории (все серверы) ----
     document.getElementById('cleanupBtn').addEventListener('click', async function() {
         if (!confirm('Удалить все файлы статистики, кроме последнего для каждого сервера?')) return;
         try {
@@ -1031,7 +1070,6 @@ class StatsHandler(http.server.BaseHTTPRequestHandler):
             const result = await resp.json();
             if (result.status === 'ok') {
                 showStatus('История очищена', 'success');
-                // Обновляем список
                 const data = await fetchLatest();
                 renderLatest(data);
             } else {
@@ -1041,6 +1079,28 @@ class StatsHandler(http.server.BaseHTTPRequestHandler):
             showStatus('Ошибка сети', 'error');
         }
     });
+
+    // ---- Очистка истории для отдельного сервера ----
+    async function cleanupServer(domain) {
+        if (!confirm('Удалить все файлы статистики для сервера ' + domain + ', кроме последнего?')) return;
+        try {
+            const resp = await fetch('/api/cleanup_server', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({domain: domain})
+            });
+            const result = await resp.json();
+            if (result.status === 'ok') {
+                showStatus('История сервера очищена', 'success');
+                const data = await fetchLatest();
+                renderLatest(data);
+            } else {
+                showStatus('Ошибка: ' + result.message, 'error');
+            }
+        } catch (e) {
+            showStatus('Ошибка сети', 'error');
+        }
+    }
 
     // ---- Основные функции ----
     async function fetchLatest() { const resp = await fetch('/api/latest'); return resp.json(); }
@@ -1072,6 +1132,7 @@ class StatsHandler(http.server.BaseHTTPRequestHandler):
                     <pre>${info.content || '(пусто)'}</pre>
                     <div style="margin-top:8px;">
                         <button class="action-btn history-toggle" onclick="toggleHistory('${domain}')">📜 История</button>
+                        <button class="action-btn" onclick="cleanupServer('${domain}')">🗑️ Очистить историю</button>
                     </div>
                     <div class="history-list" id="history_${domain}"></div>
                 </div>
@@ -1093,6 +1154,7 @@ class StatsHandler(http.server.BaseHTTPRequestHandler):
             if (!card) return;
             if (e.target.closest('.server-name')) return;
             if (e.target.closest('.history-toggle')) return;
+            if (e.target.closest('.action-btn')) return;
             if (e.target.closest('.history-item') || e.target.closest('.history-content')) return;
             const domain = card.dataset.domain;
             toggleCollapse(domain);
@@ -1221,12 +1283,11 @@ class StatsHandler(http.server.BaseHTTPRequestHandler):
 
     // ---- Инициализация ----
     (async function init() {
-        // Загружаем расписание
         try {
             const schedule = await fetchSchedule();
-            document.getElementById('scheduleInfo').textContent = 'Расписание обновления: ' + schedule.description + ' (следующий запуск: ' + schedule.next_run + ')';
+            document.getElementById('scheduleInfo').textContent = 'Следующее обновление: ' + schedule.next_run + ' (нажмите для подробностей)';
         } catch (e) {
-            document.getElementById('scheduleInfo').textContent = 'Расписание обновления: не удалось загрузить';
+            document.getElementById('scheduleInfo').textContent = 'Следующее обновление: не удалось загрузить';
         }
 
         const data = await fetchLatest();
@@ -1234,7 +1295,7 @@ class StatsHandler(http.server.BaseHTTPRequestHandler):
         setInterval(async () => {
             const newData = await fetchLatest();
             renderLatest(newData);
-        }, 180000); // 3 минуты
+        }, 3600000); // 60 минут
     })();
 </script>
 </body>
