@@ -107,6 +107,18 @@ input_frequency() {
 0 3 * * 3
 0 3 * * 5" ;;
     esac
+
+    # Сохраняем частоту для отображения в WebUI
+    mkdir -p /opt/etc/vpsmonitor-ui
+    case "$FREQ" in
+        1) SCHEDULE_DESC="1 раз в сутки (03:00)" ;;
+        2) SCHEDULE_DESC="2 раза в сутки (06:00 и 18:00)" ;;
+        3) SCHEDULE_DESC="3 раза в сутки (00:00, 08:00, 16:00)" ;;
+        4) SCHEDULE_DESC="4 раза в сутки (00:00, 06:00, 12:00, 18:00)" ;;
+        5) SCHEDULE_DESC="1 раз в неделю (воскресенье в 03:00)" ;;
+        6) SCHEDULE_DESC="3 раза в неделю (пн, ср, пт в 03:00)" ;;
+    esac
+    echo "$SCHEDULE_DESC" > /opt/etc/vpsmonitor-ui/schedule.conf
 }
 
 input_servers
@@ -151,9 +163,12 @@ collect() {
     " > "$outfile" 2>&1
     if [ -s "$outfile" ]; then
         echo "OK: $server"
+        # Удаляем маркер ошибки, если был
+        rm -f "$STATS_DIR/error_${server}.txt"
     else
         echo "FAIL: $server (пустой вывод)"
         rm -f "$outfile"
+        echo "1" > "$STATS_DIR/error_${server}.txt"
     fi
 }
 
@@ -175,7 +190,7 @@ EOF
 
 generate_collect_script
 
-# Генерация веб-сервера (Python)
+# Генерация веб-сервера (Python) с новыми функциями
 cat > /opt/etc/vpsmonitor-ui/vpsmonitor.py << 'EOF'
 #!/opt/bin/python3
 import http.server
@@ -183,11 +198,12 @@ import os
 import glob
 import urllib.parse
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 
 STATS_DIR = '/tmp/vpsmonitor_stats'
 PORT = __WEB_PORT__
 NAMES_FILE = '/opt/etc/vpsmonitor-ui/server_names.json'
+SCHEDULE_FILE = '/opt/etc/vpsmonitor-ui/schedule.conf'
 
 def load_names():
     if os.path.exists(NAMES_FILE):
@@ -201,6 +217,71 @@ def load_names():
 def save_names(names):
     with open(NAMES_FILE, 'w') as f:
         json.dump(names, f, indent=2)
+
+def load_schedule():
+    if os.path.exists(SCHEDULE_FILE):
+        with open(SCHEDULE_FILE, 'r') as f:
+            return f.read().strip()
+    return "Неизвестно"
+
+def get_next_run(schedule_desc):
+    # Парсим описание и вычисляем следующее время запуска
+    now = datetime.now()
+    # Простой парсинг для основных вариантов
+    if "1 раз в сутки" in schedule_desc:
+        # 03:00
+        next_run = now.replace(hour=3, minute=0, second=0, microsecond=0)
+        if next_run <= now:
+            next_run += timedelta(days=1)
+        return next_run.strftime('%d.%m.%Y в %H:%M')
+    elif "2 раза в сутки" in schedule_desc:
+        times = [(6,0), (18,0)]
+        for h,m in times:
+            dt = now.replace(hour=h, minute=m, second=0, microsecond=0)
+            if dt > now:
+                return dt.strftime('%d.%m.%Y в %H:%M')
+        dt = now.replace(hour=6, minute=0, second=0, microsecond=0) + timedelta(days=1)
+        return dt.strftime('%d.%m.%Y в %H:%M')
+    elif "3 раза в сутки" in schedule_desc:
+        times = [(0,0), (8,0), (16,0)]
+        for h,m in times:
+            dt = now.replace(hour=h, minute=m, second=0, microsecond=0)
+            if dt > now:
+                return dt.strftime('%d.%m.%Y в %H:%M')
+        dt = now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
+        return dt.strftime('%d.%m.%Y в %H:%M')
+    elif "4 раза в сутки" in schedule_desc:
+        times = [(0,0), (6,0), (12,0), (18,0)]
+        for h,m in times:
+            dt = now.replace(hour=h, minute=m, second=0, microsecond=0)
+            if dt > now:
+                return dt.strftime('%d.%m.%Y в %H:%M')
+        dt = now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
+        return dt.strftime('%d.%m.%Y в %H:%M')
+    elif "1 раз в неделю" in schedule_desc:
+        # воскресенье 03:00
+        days_ahead = 6 - now.weekday()  # 6 = воскресенье
+        if days_ahead <= 0:
+            days_ahead += 7
+        next_run = now.replace(hour=3, minute=0, second=0, microsecond=0) + timedelta(days=days_ahead)
+        return next_run.strftime('%d.%m.%Y в %H:%M')
+    elif "3 раза в неделю" in schedule_desc:
+        # пн, ср, пт в 03:00
+        weekdays = [0,2,4]  # пн, ср, пт
+        for wd in weekdays:
+            days_ahead = wd - now.weekday()
+            if days_ahead < 0:
+                days_ahead += 7
+            if days_ahead == 0 and now.hour < 3:
+                days_ahead = 0
+            elif days_ahead == 0 and now.hour >= 3:
+                days_ahead = 7
+            next_run = now.replace(hour=3, minute=0, second=0, microsecond=0) + timedelta(days=days_ahead)
+            if days_ahead >= 0:
+                return next_run.strftime('%d.%m.%Y в %H:%M')
+        return "Неизвестно"
+    else:
+        return "Неизвестно"
 
 class StatsHandler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
@@ -221,6 +302,12 @@ class StatsHandler(http.server.BaseHTTPRequestHandler):
             self.serve_file(parsed.query)
         elif path == '/api/names':
             self.send_json(load_names())
+        elif path == '/api/schedule':
+            self.send_json(self.get_schedule())
+        elif path == '/api/cleanup':
+            self.cleanup_history()
+        elif path == '/api/cleanup_server':
+            self.cleanup_server_history(parsed.query)
         else:
             self.send_error(404)
 
@@ -244,6 +331,49 @@ class StatsHandler(http.server.BaseHTTPRequestHandler):
         self.send_header('Content-type', 'application/json')
         self.end_headers()
         self.wfile.write(json.dumps(data, ensure_ascii=False).encode('utf-8'))
+
+    def get_schedule(self):
+        desc = load_schedule()
+        next_run = get_next_run(desc)
+        return {'description': desc, 'next_run': next_run}
+
+    def cleanup_history(self):
+        # Удаляем все файлы статистики, кроме последнего для каждого сервера
+        try:
+            files = glob.glob(os.path.join(STATS_DIR, 'stats_*.txt'))
+            servers = {}
+            for f in files:
+                basename = os.path.basename(f)
+                parts = basename.split('_')
+                if len(parts) >= 4:
+                    domain = '_'.join(parts[1:-2])
+                    servers.setdefault(domain, []).append(f)
+            for domain, flist in servers.items():
+                # сортируем по времени модификации (новые сверху)
+                flist.sort(key=lambda x: os.path.getmtime(x), reverse=True)
+                # оставляем первый (самый новый)
+                for f in flist[1:]:
+                    os.remove(f)
+            self.send_json({'status': 'ok', 'message': 'История очищена'})
+        except Exception as e:
+            self.send_json({'status': 'error', 'message': str(e)})
+
+    def cleanup_server_history(self, query):
+        params = urllib.parse.parse_qs(query)
+        domain = params.get('domain', [''])[0]
+        if not domain:
+            self.send_json({'status': 'error', 'message': 'Не указан сервер'})
+            return
+        try:
+            files = glob.glob(os.path.join(STATS_DIR, f'stats_{domain}_*.txt'))
+            # сортируем по времени модификации (новые сверху)
+            files.sort(key=lambda x: os.path.getmtime(x), reverse=True)
+            # оставляем первый (самый новый)
+            for f in files[1:]:
+                os.remove(f)
+            self.send_json({'status': 'ok', 'message': f'История для {domain} очищена'})
+        except Exception as e:
+            self.send_json({'status': 'error', 'message': str(e)})
 
     def set_name(self):
         length = int(self.headers.get('Content-Length', 0))
@@ -291,11 +421,15 @@ class StatsHandler(http.server.BaseHTTPRequestHandler):
             except:
                 formatted = latest_ts
             display_name = names.get(domain, domain)
+            # Проверяем наличие маркера ошибки
+            error_file = os.path.join(STATS_DIR, f'error_{domain}.txt')
+            status = 'error' if os.path.exists(error_file) else 'ok'
             result[domain] = {
                 'display_name': display_name,
                 'timestamp': formatted,
                 'content': content,
-                'raw_ts': latest_ts
+                'raw_ts': latest_ts,
+                'status': status
             }
         return result
 
@@ -352,7 +486,6 @@ class StatsHandler(http.server.BaseHTTPRequestHandler):
     <title>AWG 2.0 VPS Monitor – WebUI</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🌍</text></svg>">
     <style>
-        /* ---- CSS (полный, как в эталонной версии) ---- */
         :root {
             --bg-body: #0d1117;
             --bg-container: rgba(22, 27, 34, 0.85);
@@ -456,6 +589,23 @@ class StatsHandler(http.server.BaseHTTPRequestHandler):
             color: var(--text-muted);
             margin-top: 4px;
             letter-spacing: 1px;
+        }
+        .schedule-info {
+            text-align: center;
+            font-size: 0.9rem;
+            color: var(--text-muted);
+            margin: 10px auto 20px auto;
+            background: var(--pre-bg);
+            padding: 6px 14px;
+            border-radius: 20px;
+            display: inline-block;
+            width: auto;
+            border: 1px solid var(--pre-border);
+            cursor: pointer;
+            transition: 0.2s;
+        }
+        .schedule-info:hover {
+            border-color: var(--accent);
         }
         .server-card {
             background: var(--card-bg);
@@ -641,10 +791,6 @@ class StatsHandler(http.server.BaseHTTPRequestHandler):
             background: var(--btn-hover);
             border-color: var(--accent);
         }
-        .footer .footer-controls .theme-toggle-icon {
-            font-size: 1rem;
-            padding: 2px 8px;
-        }
         .footer a { color: var(--accent); text-decoration: none; transition: 0.2s; }
         .footer a:hover { text-decoration: underline; color: var(--accent-hover); }
         .footer .version { margin-top: 6px; font-size: 0.75rem; color: var(--text-muted); }
@@ -750,6 +896,14 @@ class StatsHandler(http.server.BaseHTTPRequestHandler):
         .modal .btn-primary:hover {
             background: var(--accent-hover);
         }
+        .modal .btn-danger {
+            background: #da3633;
+            border-color: #f85149;
+            color: #fff;
+        }
+        .modal .btn-danger:hover {
+            background: #f85149;
+        }
         @media (max-width: 600px) {
             body { padding: 12px; }
             .container { padding: 16px; }
@@ -768,6 +922,7 @@ class StatsHandler(http.server.BaseHTTPRequestHandler):
         <div class="globe">🌍</div>
         <h1>AWG 2.0 <span>VPS Monitor</span></h1>
         <div class="subtitle">Мониторинг трафика конфигураций AWG 2.0 на VPS</div>
+        <div class="schedule-info" id="scheduleInfo">Следующее обновление: загрузка...</div>
     </header>
 
     <div id="statusMsg" class="status-msg"></div>
@@ -777,14 +932,23 @@ class StatsHandler(http.server.BaseHTTPRequestHandler):
         <div class="footer-controls">
             <button class="btn-icon" id="helpBtn">📖 Помощь</button>
             <button class="btn-icon" id="configBtn">⚙️ Управление</button>
-            <button class="btn-icon theme-toggle-icon" id="themeToggle">🌙</button>
         </div>
         <div>&copy; 2026 <a href="https://github.com/romaca4/vpsmonitor-ui" target="_blank">romaca4/vpsmonitor-ui</a></div>
-        <div class="version">AWG 2.0 VPS Monitor (WebUI) · версия 1.0.0</div>
+        <div class="version">AWG 2.0 VPS Monitor (WebUI) · версия 1.0.1</div>
     </div>
 </div>
 
-<!-- Модальные окна -->
+<!-- Модальное окно для расписания -->
+<div class="modal" id="scheduleModal">
+    <div class="modal-content">
+        <button class="modal-close" id="closeSchedule">&times;</button>
+        <h2>📅 Расписание обновления</h2>
+        <p id="scheduleDetail">Загрузка...</p>
+        <button class="btn btn-primary" id="closeScheduleBtn" style="margin-top:15px;">Закрыть</button>
+    </div>
+</div>
+
+<!-- Модальное окно помощи -->
 <div class="modal" id="helpModal">
     <div class="modal-content">
         <button class="modal-close" id="closeHelp">&times;</button>
@@ -795,37 +959,54 @@ class StatsHandler(http.server.BaseHTTPRequestHandler):
         </details>
         <details>
             <summary>🔄 Автоматический сбор статистики</summary>
-            <p>Статистика собирается автоматически по расписанию, которое вы выбрали при установке.</p>
+            <p>Статистика собирается автоматически по расписанию, которое вы выбрали при установке. Расписание обновления показывается на главной странице веб-панели.</p>
+            <p><strong>Расположение расписания cron:</strong> <code>/opt/etc/cron.d/vpsmonitor</code></p>
+            <p>Для изменения отредактируйте этот файл вручную.</p>
         </details>
         <details>
             <summary>📜 История изменений</summary>
             <p>Под каждым сервером есть кнопка <strong>«📜 История»</strong> — нажмите, чтобы увидеть все сохранённые файлы статистики. Клик по файлу покажет его содержимое.</p>
         </details>
         <details>
+            <summary>🗑️ Очистка истории</summary>
+            <p>В разделе <strong>«Управление»</strong> доступна кнопка <strong>«Очистить историю»</strong> для всех серверов. Она удаляет все файлы статистики, кроме последнего для каждого сервера.</p>
+            <p>Для очистки истории отдельного сервера разверните его карточку и нажмите кнопку <strong>«🗑️ Очистить»</strong> рядом с кнопкой «История».</p>
+        </details>
+        <details>
             <summary>🔒 Конфиденциальность</summary>
             <p>Ваши IP-адреса, домены и пароли <strong>не передаются никуда</strong> и хранятся исключительно локально на вашем роутере. Исходный код проекта открыт, вы можете изучить его на <a href="https://github.com/romaca4/vpsmonitor-ui" target="_blank">GitHub</a>.</p>
+        </details>
+        <details>
+            <summary>🗑️ Удаление веб-панели</summary>
+            <p>Для полного удаления веб-панели используйте скрипт <code>uninstall.sh</code>, который доступен в репозитории проекта.</p>
         </details>
         <button class="btn btn-primary" id="closeHelpBtn" style="margin-top:15px;">Закрыть</button>
     </div>
 </div>
 
+<!-- Модальное окно управления -->
 <div class="modal" id="configModal">
     <div class="modal-content">
         <button class="modal-close" id="closeConfig">&times;</button>
-        <h2>⚙️ Управление серверами</h2>
+        <h2>⚙️ Управление</h2>
         <p><strong>Добавление, изменение или удаление сервера</strong> производится через редактирование файла конфигурации на роутере:</p>
         <div class="code-block" onclick="copyText(this)">/opt/etc/vpsmonitor-ui/vpsmonitor.sh</div>
         <p>Откройте файл через SSH (например, <code>nano /opt/etc/vpsmonitor-ui/vpsmonitor.sh</code>) и измените строки <code>SERVER1=...</code>, <code>PASS1=...</code> и т.д. После редактирования сохраните файл.</p>
         <p><strong>Применение изменений:</strong></p>
         <div class="code-block" onclick="copyText(this)">/opt/etc/init.d/S99vpsmonitor stop</div>
         <div class="code-block" onclick="copyText(this)">/opt/etc/init.d/S99vpsmonitor start</div>
-        <p><strong>Или просто перезагрузите роутер.</strong></p>
+        <p><strong>Проверка статуса сервера:</strong></p>
+        <div class="code-block" onclick="copyText(this)">/opt/etc/init.d/S99vpsmonitor status</div>
         <p><strong>Ручной запуск сбора статистики</strong> (вне расписания):</p>
         <div class="code-block" onclick="copyText(this)">/opt/etc/vpsmonitor-ui/vpsmonitor.sh</div>
         <p><strong>Остановка веб-сервера:</strong></p>
         <div class="code-block" onclick="copyText(this)">/opt/etc/init.d/S99vpsmonitor stop</div>
         <p><strong>Запуск веб-сервера:</strong></p>
         <div class="code-block" onclick="copyText(this)">/opt/etc/init.d/S99vpsmonitor start</div>
+        <hr style="border-color:var(--border-color); margin:15px 0;">
+        <p><strong>Настройки:</strong></p>
+        <button class="btn" id="themeToggleModal" style="margin-right:10px;">🌙 Сменить тему</button>
+        <button class="btn btn-danger" id="cleanupBtn">🗑️ Очистить историю (все серверы)</button>
         <p style="margin-top:15px; color:var(--text-muted);">Все пароли хранятся в открытом виде. Ограничьте доступ к SSH роутера.</p>
         <button class="btn btn-primary" id="closeConfigBtn" style="margin-top:15px;">Закрыть</button>
     </div>
@@ -833,28 +1014,45 @@ class StatsHandler(http.server.BaseHTTPRequestHandler):
 
 <script>
     // ---- Тема ----
-    const themeToggle = document.getElementById('themeToggle');
-    const currentTheme = localStorage.getItem('theme') || 'dark';
+    let currentTheme = localStorage.getItem('theme') || 'dark';
     if (currentTheme === 'light') {
         document.body.classList.add('light');
-        themeToggle.textContent = '☀️';
     }
-    themeToggle.addEventListener('click', () => {
+    document.getElementById('themeToggleModal').addEventListener('click', function() {
         document.body.classList.toggle('light');
         const isLight = document.body.classList.contains('light');
         localStorage.setItem('theme', isLight ? 'light' : 'dark');
-        themeToggle.textContent = isLight ? '☀️' : '🌙';
+        this.textContent = isLight ? '☀️ Сменить тему' : '🌙 Сменить тему';
     });
+    document.getElementById('themeToggleModal').textContent = currentTheme === 'light' ? '☀️ Сменить тему' : '🌙 Сменить тему';
 
     // ---- Модальные окна ----
+    const scheduleModal = document.getElementById('scheduleModal');
     const helpModal = document.getElementById('helpModal');
     const configModal = document.getElementById('configModal');
+
+    document.getElementById('scheduleInfo').addEventListener('click', async function() {
+        try {
+            const resp = await fetch('/api/schedule');
+            const data = await resp.json();
+            document.getElementById('scheduleDetail').textContent = 'Текущее расписание: ' + data.description + ' (следующий запуск: ' + data.next_run + ')';
+        } catch (e) {
+            document.getElementById('scheduleDetail').textContent = 'Не удалось загрузить расписание';
+        }
+        scheduleModal.classList.add('show');
+    });
+    document.getElementById('closeSchedule').addEventListener('click', () => scheduleModal.classList.remove('show'));
+    document.getElementById('closeScheduleBtn').addEventListener('click', () => scheduleModal.classList.remove('show'));
+    window.addEventListener('click', (e) => { if (e.target === scheduleModal) scheduleModal.classList.remove('show'); });
+
     document.getElementById('helpBtn').addEventListener('click', () => helpModal.classList.add('show'));
     document.getElementById('closeHelp').addEventListener('click', () => helpModal.classList.remove('show'));
     document.getElementById('closeHelpBtn').addEventListener('click', () => helpModal.classList.remove('show'));
+
     document.getElementById('configBtn').addEventListener('click', () => configModal.classList.add('show'));
     document.getElementById('closeConfig').addEventListener('click', () => configModal.classList.remove('show'));
     document.getElementById('closeConfigBtn').addEventListener('click', () => configModal.classList.remove('show'));
+
     window.addEventListener('click', (e) => {
         if (e.target === helpModal) helpModal.classList.remove('show');
         if (e.target === configModal) configModal.classList.remove('show');
@@ -870,9 +1068,28 @@ class StatsHandler(http.server.BaseHTTPRequestHandler):
         }).catch(() => {});
     }
 
+    // ---- Очистка истории (все серверы) ----
+    document.getElementById('cleanupBtn').addEventListener('click', async function() {
+        if (!confirm('Удалить все файлы статистики, кроме последнего для каждого сервера?')) return;
+        try {
+            const resp = await fetch('/api/cleanup');
+            const result = await resp.json();
+            if (result.status === 'ok') {
+                showStatus('История очищена', 'success');
+                const data = await fetchLatest();
+                renderLatest(data);
+            } else {
+                showStatus('Ошибка: ' + result.message, 'error');
+            }
+        } catch (e) {
+            showStatus('Ошибка сети', 'error');
+        }
+    });
+
     // ---- Основные функции ----
     async function fetchLatest() { const resp = await fetch('/api/latest'); return resp.json(); }
     async function fetchHistory() { const resp = await fetch('/api/history'); return resp.json(); }
+    async function fetchSchedule() { const resp = await fetch('/api/schedule'); return resp.json(); }
     function showStatus(text, type='') { const el = document.getElementById('statusMsg'); el.textContent = text; el.className = 'status-msg' + (type ? ' ' + type : ''); }
 
     function renderLatest(data) {
@@ -885,8 +1102,8 @@ class StatsHandler(http.server.BaseHTTPRequestHandler):
         for (const [domain, info] of Object.entries(data)) {
             const displayName = info.display_name || domain;
             const ts = info.timestamp;
-            const statusClass = info.content && info.content.length > 0 ? 'ok' : 'fail';
-            const statusTitle = info.content && info.content.length > 0 ? 'Данные получены' : 'Нет данных';
+            const statusClass = info.status === 'ok' ? 'ok' : 'fail';
+            const statusTitle = info.status === 'ok' ? 'Данные получены' : 'Ошибка сбора';
             html += `<div class="server-card" data-domain="${domain}">
                 <div class="server-header">
                     <span>
@@ -897,8 +1114,9 @@ class StatsHandler(http.server.BaseHTTPRequestHandler):
                 <div class="server-meta"><span class="time">Обновлено: ${ts}</span></div>
                 <div class="server-content" id="content_${domain}">
                     <pre>${info.content || '(пусто)'}</pre>
-                    <div style="margin-top:8px;">
+                    <div style="margin-top:8px; display:flex; gap:8px; flex-wrap:wrap;">
                         <button class="action-btn history-toggle" onclick="toggleHistory('${domain}')">📜 История</button>
+                        <button class="action-btn" onclick="cleanupServer('${domain}')" style="color:#f85149; border-color:#f85149;">🗑️ Очистить</button>
                     </div>
                     <div class="history-list" id="history_${domain}"></div>
                 </div>
@@ -920,6 +1138,7 @@ class StatsHandler(http.server.BaseHTTPRequestHandler):
             if (!card) return;
             if (e.target.closest('.server-name')) return;
             if (e.target.closest('.history-toggle')) return;
+            if (e.target.closest('.action-btn')) return; // не сворачиваем при клике на кнопки
             if (e.target.closest('.history-item') || e.target.closest('.history-content')) return;
             const domain = card.dataset.domain;
             toggleCollapse(domain);
@@ -1046,14 +1265,39 @@ class StatsHandler(http.server.BaseHTTPRequestHandler):
         localStorage.setItem('collapsed_' + domain, isCollapsed ? 'true' : 'false');
     }
 
+    // ---- Очистка истории для одного сервера ----
+    async function cleanupServer(domain) {
+        if (!confirm(`Удалить все файлы статистики для сервера ${domain}, кроме последнего?`)) return;
+        try {
+            const resp = await fetch(`/api/cleanup_server?domain=${encodeURIComponent(domain)}`);
+            const result = await resp.json();
+            if (result.status === 'ok') {
+                showStatus(`История для ${domain} очищена`, 'success');
+                const data = await fetchLatest();
+                renderLatest(data);
+            } else {
+                showStatus('Ошибка: ' + result.message, 'error');
+            }
+        } catch (e) {
+            showStatus('Ошибка сети', 'error');
+        }
+    }
+
     // ---- Инициализация ----
     (async function init() {
+        try {
+            const schedule = await fetchSchedule();
+            document.getElementById('scheduleInfo').textContent = 'Следующее обновление: ' + schedule.next_run;
+        } catch (e) {
+            document.getElementById('scheduleInfo').textContent = 'Следующее обновление: не удалось загрузить';
+        }
+
         const data = await fetchLatest();
         renderLatest(data);
         setInterval(async () => {
             const newData = await fetchLatest();
             renderLatest(newData);
-        }, 1800000); // 30 минут
+        }, 3600000); // 60 минут
     })();
 </script>
 </body>
@@ -1141,14 +1385,27 @@ else
     chmod +x "$RC_LOCAL"
 fi
 
-# Настройка cron
+# ---- Настройка cron (для Keenetic через системный каталог /opt/etc/cron.d) ----
 echo -e "${GREEN}Настройка cron...${NC}"
-(crontab -l 2>/dev/null | grep -v vpsmonitor.sh | crontab -) 2>/dev/null || true
-echo "$CRON_LINES" | while read -r line; do
-    [ -n "$line" ] && (crontab -l 2>/dev/null; echo "$line /opt/etc/vpsmonitor-ui/vpsmonitor.sh") | crontab -
-done
 
-# Запуск веб-сервера
+# Удаляем старые задания из пользовательского crontab (если остались)
+(crontab -l 2>/dev/null | grep -v vpsmonitor.sh | crontab -) 2>/dev/null || true
+
+# Удаляем старый файл, если есть
+rm -f /opt/etc/cron.d/vpsmonitor
+mkdir -p /opt/etc/cron.d
+
+# Записываем новые строки расписания
+> /opt/etc/cron.d/vpsmonitor
+echo "$CRON_LINES" | while read -r line; do
+    [ -n "$line" ] && echo "$line root /opt/etc/vpsmonitor-ui/vpsmonitor.sh > /dev/null 2>&1" >> /opt/etc/cron.d/vpsmonitor
+done
+chmod 644 /opt/etc/cron.d/vpsmonitor
+
+# Перезапускаем cron, чтобы применить изменения
+/opt/etc/init.d/S10cron restart
+
+# ---- Запуск веб-сервера ----
 echo -e "${GREEN}Запуск веб-сервера...${NC}"
 /opt/etc/init.d/S99vpsmonitor stop 2>/dev/null || true
 /opt/etc/init.d/S99vpsmonitor start
@@ -1170,6 +1427,9 @@ echo ""
 echo "Остановка: /opt/etc/init.d/S99vpsmonitor stop"
 echo "Запуск: /opt/etc/init.d/S99vpsmonitor start"
 echo "Статус: /opt/etc/init.d/S99vpsmonitor status"
+echo ""
+echo "Расписание cron: /opt/etc/cron.d/vpsmonitor"
+echo "Для изменения отредактируйте этот файл вручную."
 echo ""
 echo -e "${YELLOW}Пароли SSH хранятся в открытом виде в /opt/etc/vpsmonitor-ui/vpsmonitor.sh${NC}"
 echo "Рекомендуется: chmod 600 /opt/etc/vpsmonitor-ui/vpsmonitor.sh"
