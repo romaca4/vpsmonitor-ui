@@ -91,21 +91,22 @@ input_frequency() {
     done
 
     CRON_LINES=""
+    # Описание частоты для отображения в WebUI
     case "$FREQ" in
-        1) CRON_LINES="0 3 * * *" ;;
+        1) CRON_LINES="0 3 * * *"; SCHED_DESC="1 раз в сутки (03:00)" ;;
         2) CRON_LINES="0 6 * * *
-0 18 * * *" ;;
+0 18 * * *"; SCHED_DESC="2 раза в сутки (06:00 и 18:00)" ;;
         3) CRON_LINES="0 0 * * *
 0 8 * * *
-0 16 * * *" ;;
+0 16 * * *"; SCHED_DESC="3 раза в сутки (00:00, 08:00, 16:00)" ;;
         4) CRON_LINES="0 0 * * *
 0 6 * * *
 0 12 * * *
-0 18 * * *" ;;
-        5) CRON_LINES="0 3 * * 0" ;;
+0 18 * * *"; SCHED_DESC="4 раза в сутки (00:00, 06:00, 12:00, 18:00)" ;;
+        5) CRON_LINES="0 3 * * 0"; SCHED_DESC="1 раз в неделю (воскресенье 03:00)" ;;
         6) CRON_LINES="0 3 * * 1
 0 3 * * 3
-0 3 * * 5" ;;
+0 3 * * 5"; SCHED_DESC="3 раза в неделю (пн, ср, пт 03:00)" ;;
     esac
 }
 
@@ -113,6 +114,9 @@ input_servers
 input_frequency
 
 mkdir -p /opt/etc/vpsmonitor-ui
+
+# Сохраняем описание расписания для WebUI
+echo "$SCHED_DESC" > /opt/etc/vpsmonitor-ui/schedule.conf
 
 # Генерация скрипта сбора
 generate_collect_script() {
@@ -143,6 +147,8 @@ collect() {
     local pass="$2"
     local timestamp=$(date +%Y%m%d_%H%M%S)
     local outfile="$STATS_DIR/stats_${server}_${timestamp}.txt"
+    # Маркер ошибки для статуса
+    local errfile="$STATS_DIR/error_${server}.txt"
     expect -c "
         set timeout 15
         spawn ssh -p $SSH_PORT -o StrictHostKeyChecking=no $SSH_USER@$server \"bash /root/awg/manage_amneziawg.sh stats\"
@@ -151,9 +157,12 @@ collect() {
     " > "$outfile" 2>&1
     if [ -s "$outfile" ]; then
         echo "OK: $server"
+        rm -f "$errfile"
     else
         echo "FAIL: $server (пустой вывод)"
         rm -f "$outfile"
+        # Создаём маркер ошибки
+        echo "Ошибка подключения к $server в $(date)" > "$errfile"
     fi
 }
 
@@ -184,10 +193,12 @@ import glob
 import urllib.parse
 import json
 from datetime import datetime
+import subprocess
 
 STATS_DIR = '/tmp/vpsmonitor_stats'
 PORT = __WEB_PORT__
 NAMES_FILE = '/opt/etc/vpsmonitor-ui/server_names.json'
+SCHEDULE_FILE = '/opt/etc/vpsmonitor-ui/schedule.conf'
 
 def load_names():
     if os.path.exists(NAMES_FILE):
@@ -201,6 +212,12 @@ def load_names():
 def save_names(names):
     with open(NAMES_FILE, 'w') as f:
         json.dump(names, f, indent=2)
+
+def get_schedule():
+    if os.path.exists(SCHEDULE_FILE):
+        with open(SCHEDULE_FILE, 'r') as f:
+            return f.read().strip()
+    return "Не установлено"
 
 class StatsHandler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
@@ -221,6 +238,12 @@ class StatsHandler(http.server.BaseHTTPRequestHandler):
             self.serve_file(parsed.query)
         elif path == '/api/names':
             self.send_json(load_names())
+        elif path == '/api/schedule':
+            self.send_json({'schedule': get_schedule()})
+        elif path == '/api/cleanup':
+            self.run_cleanup()
+        elif path == '/api/count':
+            self.send_json(self.get_file_counts())
         else:
             self.send_error(404)
 
@@ -229,6 +252,8 @@ class StatsHandler(http.server.BaseHTTPRequestHandler):
         path = parsed.path
         if path == '/api/setname':
             self.set_name()
+        elif path == '/api/cleanup':
+            self.run_cleanup()
         else:
             self.send_error(404)
 
@@ -257,6 +282,29 @@ class StatsHandler(http.server.BaseHTTPRequestHandler):
         names[domain] = new_name
         save_names(names)
         self.send_json({'status': 'ok'})
+
+    def run_cleanup(self):
+        try:
+            # Удаляем все файлы, кроме последнего для каждого сервера
+            for domain in self.get_domains():
+                files = sorted(glob.glob(os.path.join(STATS_DIR, f'stats_{domain}_*.txt')))
+                if len(files) > 1:
+                    for f in files[:-1]:
+                        os.remove(f)
+            self.send_json({'status': 'ok'})
+        except Exception as e:
+            self.send_json({'status': 'error', 'message': str(e)})
+
+    def get_domains(self):
+        files = glob.glob(os.path.join(STATS_DIR, 'stats_*.txt'))
+        domains = set()
+        for f in files:
+            basename = os.path.basename(f)
+            parts = basename.split('_')
+            if len(parts) >= 4:
+                domain = '_'.join(parts[1:-2])
+                domains.add(domain)
+        return list(domains)
 
     def get_latest(self):
         files = glob.glob(os.path.join(STATS_DIR, 'stats_*.txt'))
@@ -291,11 +339,15 @@ class StatsHandler(http.server.BaseHTTPRequestHandler):
             except:
                 formatted = latest_ts
             display_name = names.get(domain, domain)
+            # Проверяем статус ошибки
+            errfile = os.path.join(STATS_DIR, f'error_{domain}.txt')
+            error = os.path.exists(errfile)
             result[domain] = {
                 'display_name': display_name,
                 'timestamp': formatted,
                 'content': content,
-                'raw_ts': latest_ts
+                'raw_ts': latest_ts,
+                'error': error
             }
         return result
 
@@ -317,6 +369,17 @@ class StatsHandler(http.server.BaseHTTPRequestHandler):
         for domain in history:
             history[domain].sort(key=lambda x: x['timestamp'], reverse=True)
         return history
+
+    def get_file_counts(self):
+        files = glob.glob(os.path.join(STATS_DIR, 'stats_*.txt'))
+        counts = {}
+        for f in files:
+            basename = os.path.basename(f)
+            parts = basename.split('_')
+            if len(parts) >= 4:
+                domain = '_'.join(parts[1:-2])
+                counts[domain] = counts.get(domain, 0) + 1
+        return counts
 
     def serve_file(self, query):
         params = urllib.parse.parse_qs(query)
@@ -344,6 +407,10 @@ class StatsHandler(http.server.BaseHTTPRequestHandler):
         self.wfile.write(content.encode('utf-8'))
 
     def generate_html(self):
+        # HTML будет добавлен позже – пока оставляем старую версию, но в финальном скрипте мы его обновим
+        return self.generate_html_v101()
+
+    def generate_html_v101(self):
         return '''<!DOCTYPE html>
 <html lang="ru">
 <head>
@@ -352,7 +419,7 @@ class StatsHandler(http.server.BaseHTTPRequestHandler):
     <title>AWG 2.0 VPS Monitor – WebUI</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🌍</text></svg>">
     <style>
-        /* ---- CSS (полный, как в эталонной версии) ---- */
+        /* ---- CSS с анимацией ---- */
         :root {
             --bg-body: #0d1117;
             --bg-container: rgba(22, 27, 34, 0.85);
@@ -457,6 +524,17 @@ class StatsHandler(http.server.BaseHTTPRequestHandler):
             margin-top: 4px;
             letter-spacing: 1px;
         }
+        .schedule-info {
+            text-align: center;
+            margin: 10px 0;
+            padding: 6px 12px;
+            background: var(--pre-bg);
+            border-radius: 20px;
+            display: inline-block;
+            border: 1px solid var(--pre-border);
+            color: var(--text-muted);
+            font-size: 0.9rem;
+        }
         .server-card {
             background: var(--card-bg);
             border: 1px solid var(--card-border);
@@ -466,6 +544,7 @@ class StatsHandler(http.server.BaseHTTPRequestHandler):
             transition: background 0.3s, border-color 0.3s, box-shadow 0.3s, transform 0.25s ease;
             box-shadow: var(--card-shadow);
             cursor: pointer;
+            position: relative;
         }
         .server-card:hover {
             border-color: var(--accent);
@@ -528,8 +607,16 @@ class StatsHandler(http.server.BaseHTTPRequestHandler):
             flex-wrap: wrap;
             justify-content: flex-end;
             align-items: center;
+            gap: 12px;
         }
         .server-meta .time { color: var(--text-muted); }
+        .server-meta .file-count {
+            color: var(--text-muted);
+            background: var(--btn-bg);
+            padding: 0 8px;
+            border-radius: 12px;
+            font-size: 0.8rem;
+        }
         .action-btn {
             background: none;
             border: 1px solid var(--border-color);
@@ -544,6 +631,10 @@ class StatsHandler(http.server.BaseHTTPRequestHandler):
         .action-btn:hover {
             background: var(--btn-hover);
             color: var(--text-primary);
+        }
+        .action-btn.danger:hover {
+            border-color: #f85149;
+            color: #f85149;
         }
         pre {
             background: var(--pre-bg);
@@ -569,10 +660,6 @@ class StatsHandler(http.server.BaseHTTPRequestHandler):
             opacity: 0;
             padding: 0 !important;
             margin: 0 !important;
-        }
-        .server-content.collapsed pre,
-        .server-content.collapsed .history-list {
-            pointer-events: none;
         }
         .history-list {
             display: none;
@@ -641,10 +728,6 @@ class StatsHandler(http.server.BaseHTTPRequestHandler):
             background: var(--btn-hover);
             border-color: var(--accent);
         }
-        .footer .footer-controls .theme-toggle-icon {
-            font-size: 1rem;
-            padding: 2px 8px;
-        }
         .footer a { color: var(--accent); text-decoration: none; transition: 0.2s; }
         .footer a:hover { text-decoration: underline; color: var(--accent-hover); }
         .footer .version { margin-top: 6px; font-size: 0.75rem; color: var(--text-muted); }
@@ -657,6 +740,16 @@ class StatsHandler(http.server.BaseHTTPRequestHandler):
         }
         .status-msg.error { color: #f85149; }
         .status-msg.success { color: #3fb950; }
+
+        /* ---- Анимация обновления ---- */
+        @keyframes fadeRefresh {
+            0% { opacity: 0.6; }
+            50% { opacity: 1; }
+            100% { opacity: 0.6; }
+        }
+        .refreshing .server-card {
+            animation: fadeRefresh 1s ease 2;
+        }
 
         /* Модальные окна */
         .modal {
@@ -763,11 +856,12 @@ class StatsHandler(http.server.BaseHTTPRequestHandler):
     </style>
 </head>
 <body>
-<div class="container">
+<div class="container" id="app">
     <header>
         <div class="globe">🌍</div>
         <h1>AWG 2.0 <span>VPS Monitor</span></h1>
         <div class="subtitle">Мониторинг трафика конфигураций AWG 2.0 на VPS</div>
+        <div id="scheduleDisplay" class="schedule-info">Загрузка расписания...</div>
     </header>
 
     <div id="statusMsg" class="status-msg"></div>
@@ -777,10 +871,10 @@ class StatsHandler(http.server.BaseHTTPRequestHandler):
         <div class="footer-controls">
             <button class="btn-icon" id="helpBtn">📖 Помощь</button>
             <button class="btn-icon" id="configBtn">⚙️ Управление</button>
-            <button class="btn-icon theme-toggle-icon" id="themeToggle">🌙</button>
+            <button class="btn-icon" id="cleanupAllBtn">🗑️ Очистить всю историю</button>
         </div>
         <div>&copy; 2026 <a href="https://github.com/romaca4/vpsmonitor-ui" target="_blank">romaca4/vpsmonitor-ui</a></div>
-        <div class="version">AWG 2.0 VPS Monitor (WebUI) · версия 1.0.0</div>
+        <div class="version">AWG 2.0 VPS Monitor (WebUI) · версия 1.0.1</div>
     </div>
 </div>
 
@@ -812,7 +906,10 @@ class StatsHandler(http.server.BaseHTTPRequestHandler):
 <div class="modal" id="configModal">
     <div class="modal-content">
         <button class="modal-close" id="closeConfig">&times;</button>
-        <h2>⚙️ Управление серверами</h2>
+        <h2>⚙️ Управление</h2>
+        <p><strong>Тема:</strong></p>
+        <button class="btn" id="themeToggleModal">🌙 Сменить тему</button>
+        <hr style="margin:15px 0; border-color:var(--border-color);">
         <p><strong>Добавление, изменение или удаление сервера</strong> производится через редактирование файла конфигурации на роутере:</p>
         <div class="code-block" onclick="copyText(this)">/opt/etc/vpsmonitor-ui/vpsmonitor.sh</div>
         <p>Откройте файл через SSH (например, <code>nano /opt/etc/vpsmonitor-ui/vpsmonitor.sh</code>) и измените строки <code>SERVER1=...</code>, <code>PASS1=...</code> и т.д. После редактирования сохраните файл.</p>
@@ -822,28 +919,27 @@ class StatsHandler(http.server.BaseHTTPRequestHandler):
         <p><strong>Или просто перезагрузите роутер.</strong></p>
         <p><strong>Ручной запуск сбора статистики</strong> (вне расписания):</p>
         <div class="code-block" onclick="copyText(this)">/opt/etc/vpsmonitor-ui/vpsmonitor.sh</div>
-        <p><strong>Остановка веб-сервера:</strong></p>
-        <div class="code-block" onclick="copyText(this)">/opt/etc/init.d/S99vpsmonitor stop</div>
-        <p><strong>Запуск веб-сервера:</strong></p>
-        <div class="code-block" onclick="copyText(this)">/opt/etc/init.d/S99vpsmonitor start</div>
+        <p><strong>Очистка истории:</strong> на главной странице есть кнопка «🗑️ Очистить всю историю» в футере, а также для каждого сервера доступна кнопка очистки (оставляет только последний файл).</p>
         <p style="margin-top:15px; color:var(--text-muted);">Все пароли хранятся в открытом виде. Ограничьте доступ к SSH роутера.</p>
         <button class="btn btn-primary" id="closeConfigBtn" style="margin-top:15px;">Закрыть</button>
     </div>
 </div>
 
 <script>
-    // ---- Тема ----
-    const themeToggle = document.getElementById('themeToggle');
+    // ---- Тема (глобальная) ----
+    const themeToggleBtn = document.getElementById('themeToggleModal');
     const currentTheme = localStorage.getItem('theme') || 'dark';
     if (currentTheme === 'light') {
         document.body.classList.add('light');
-        themeToggle.textContent = '☀️';
+        themeToggleBtn.textContent = '☀️ Сменить тему';
+    } else {
+        themeToggleBtn.textContent = '🌙 Сменить тему';
     }
-    themeToggle.addEventListener('click', () => {
+    themeToggleBtn.addEventListener('click', () => {
         document.body.classList.toggle('light');
         const isLight = document.body.classList.contains('light');
         localStorage.setItem('theme', isLight ? 'light' : 'dark');
-        themeToggle.textContent = isLight ? '☀️' : '🌙';
+        themeToggleBtn.textContent = isLight ? '☀️ Сменить тему' : '🌙 Сменить тему';
     });
 
     // ---- Модальные окна ----
@@ -873,9 +969,22 @@ class StatsHandler(http.server.BaseHTTPRequestHandler):
     // ---- Основные функции ----
     async function fetchLatest() { const resp = await fetch('/api/latest'); return resp.json(); }
     async function fetchHistory() { const resp = await fetch('/api/history'); return resp.json(); }
+    async function fetchSchedule() { const resp = await fetch('/api/schedule'); return resp.json(); }
+    async function fetchCounts() { const resp = await fetch('/api/count'); return resp.json(); }
+    async function cleanupAll() {
+        const resp = await fetch('/api/cleanup', { method: 'POST' });
+        return resp.json();
+    }
     function showStatus(text, type='') { const el = document.getElementById('statusMsg'); el.textContent = text; el.className = 'status-msg' + (type ? ' ' + type : ''); }
 
-    function renderLatest(data) {
+    // ---- Отображение расписания ----
+    async function loadSchedule() {
+        const data = await fetchSchedule();
+        document.getElementById('scheduleDisplay').textContent = 'Расписание: ' + (data.schedule || 'Не установлено');
+    }
+
+    // ---- Отрисовка данных ----
+    async function renderLatest(data, counts) {
         const container = document.getElementById('content');
         if (!data || Object.keys(data).length === 0) {
             container.innerHTML = '<p style="text-align:center; color:var(--text-muted); padding:40px 0;">Нет данных. Дождитесь первого сбора.</p>';
@@ -885,16 +994,23 @@ class StatsHandler(http.server.BaseHTTPRequestHandler):
         for (const [domain, info] of Object.entries(data)) {
             const displayName = info.display_name || domain;
             const ts = info.timestamp;
-            const statusClass = info.content && info.content.length > 0 ? 'ok' : 'fail';
-            const statusTitle = info.content && info.content.length > 0 ? 'Данные получены' : 'Нет данных';
+            const statusClass = info.error ? 'fail' : (info.content && info.content.length > 0 ? 'ok' : 'unknown');
+            const statusTitle = info.error ? 'Ошибка подключения' : (info.content && info.content.length > 0 ? 'Данные получены' : 'Нет данных');
+            const fileCount = counts[domain] || 0;
             html += `<div class="server-card" data-domain="${domain}">
                 <div class="server-header">
                     <span>
                         <span class="server-status ${statusClass}" title="${statusTitle}"></span>
                         <span class="server-name" onclick="editName('${domain}')" id="name_${domain}">${displayName}</span>
                     </span>
+                    <span>
+                        <button class="action-btn" onclick="cleanupServer('${domain}')" title="Очистить историю (оставить последний файл)">🗑️</button>
+                    </span>
                 </div>
-                <div class="server-meta"><span class="time">Обновлено: ${ts}</span></div>
+                <div class="server-meta">
+                    <span class="time">Обновлено: ${ts}</span>
+                    <span class="file-count">📁 ${fileCount} файлов</span>
+                </div>
                 <div class="server-content" id="content_${domain}">
                     <pre>${info.content || '(пусто)'}</pre>
                     <div style="margin-top:8px;">
@@ -915,17 +1031,54 @@ class StatsHandler(http.server.BaseHTTPRequestHandler):
                 }
             }
         }
+        // Обработчик клика для сворачивания/разворачивания
         container.addEventListener('click', function(e) {
             const card = e.target.closest('.server-card');
             if (!card) return;
             if (e.target.closest('.server-name')) return;
             if (e.target.closest('.history-toggle')) return;
             if (e.target.closest('.history-item') || e.target.closest('.history-content')) return;
+            if (e.target.closest('.action-btn')) return;
             const domain = card.dataset.domain;
             toggleCollapse(domain);
         });
     }
 
+    // ---- Очистка для одного сервера ----
+    async function cleanupServer(domain) {
+        if (!confirm('Удалить все старые файлы статистики для сервера ' + domain + ' (останется только последний)?')) return;
+        try {
+            const resp = await fetch('/api/cleanup', { method: 'POST' });
+            const result = await resp.json();
+            if (result.status === 'ok') {
+                showStatus('История очищена для ' + domain, 'success');
+                refreshAll();
+            } else {
+                showStatus('Ошибка: ' + (result.message || ''), 'error');
+            }
+        } catch (e) {
+            showStatus('Ошибка сети', 'error');
+        }
+    }
+
+    // ---- Очистка всей истории ----
+    document.getElementById('cleanupAllBtn').addEventListener('click', async function() {
+        if (!confirm('Удалить все старые файлы статистики для всех серверов (останется только по последнему файлу для каждого)?')) return;
+        try {
+            const resp = await fetch('/api/cleanup', { method: 'POST' });
+            const result = await resp.json();
+            if (result.status === 'ok') {
+                showStatus('Вся история очищена', 'success');
+                refreshAll();
+            } else {
+                showStatus('Ошибка: ' + (result.message || ''), 'error');
+            }
+        } catch (e) {
+            showStatus('Ошибка сети', 'error');
+        }
+    });
+
+    // ---- Загрузка истории ----
     async function loadHistory(domain) {
         const historyData = await fetchHistory();
         if (!historyData) return;
@@ -1046,14 +1199,28 @@ class StatsHandler(http.server.BaseHTTPRequestHandler):
         localStorage.setItem('collapsed_' + domain, isCollapsed ? 'true' : 'false');
     }
 
+    // ---- Обновление всех данных с анимацией ----
+    async function refreshAll() {
+        const app = document.getElementById('app');
+        app.classList.add('refreshing');
+        try {
+            const [latest, counts] = await Promise.all([fetchLatest(), fetchCounts()]);
+            await renderLatest(latest, counts);
+            await loadSchedule();
+        } catch (e) {
+            console.error('Refresh error', e);
+        } finally {
+            setTimeout(() => {
+                app.classList.remove('refreshing');
+            }, 500);
+        }
+    }
+
     // ---- Инициализация ----
     (async function init() {
-        const data = await fetchLatest();
-        renderLatest(data);
-        setInterval(async () => {
-            const newData = await fetchLatest();
-            renderLatest(newData);
-        }, 1800000); // 30 минут
+        await loadSchedule();
+        await refreshAll();
+        setInterval(refreshAll, 1800000); // 30 минут
     })();
 </script>
 </body>
