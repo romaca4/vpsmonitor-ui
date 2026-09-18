@@ -130,6 +130,8 @@ mkdir -p /opt/etc/vpsmonitor-ui
 generate_collect_script() {
     cat > /opt/etc/vpsmonitor-ui/vpsmonitor.sh << EOF
 #!/bin/sh
+export PATH=/opt/bin:/opt/sbin:/bin:/sbin:/usr/bin:/usr/sbin
+
 STATS_DIR="/tmp/vpsmonitor_stats"
 mkdir -p "\$STATS_DIR"
 
@@ -934,7 +936,7 @@ class StatsHandler(http.server.BaseHTTPRequestHandler):
             <button class="btn-icon" id="configBtn">⚙️ Управление</button>
         </div>
         <div>&copy; 2026 <a href="https://github.com/romaca4/vpsmonitor-ui" target="_blank">romaca4/vpsmonitor-ui</a></div>
-        <div class="version">AWG 2.0 VPS Monitor (WebUI) · версия 1.0.1</div>
+        <div class="version">AWG 2.0 VPS Monitor (WebUI) · версия 1.0.2</div>
     </div>
 </div>
 
@@ -1138,7 +1140,7 @@ class StatsHandler(http.server.BaseHTTPRequestHandler):
             if (!card) return;
             if (e.target.closest('.server-name')) return;
             if (e.target.closest('.history-toggle')) return;
-            if (e.target.closest('.action-btn')) return; // не сворачиваем при клике на кнопки
+            if (e.target.closest('.action-btn')) return;
             if (e.target.closest('.history-item') || e.target.closest('.history-content')) return;
             const domain = card.dataset.domain;
             toggleCollapse(domain);
@@ -1388,6 +1390,9 @@ fi
 # ---- Настройка cron (для Keenetic через системный каталог /opt/etc/cron.d) ----
 echo -e "${GREEN}Настройка cron...${NC}"
 
+# Убеждаемся, что демон cron запущен
+/opt/etc/init.d/S10cron start 2>/dev/null || true
+
 # Удаляем старые задания из пользовательского crontab (если остались)
 (crontab -l 2>/dev/null | grep -v vpsmonitor.sh | crontab -) 2>/dev/null || true
 
@@ -1395,15 +1400,20 @@ echo -e "${GREEN}Настройка cron...${NC}"
 rm -f /opt/etc/cron.d/vpsmonitor
 mkdir -p /opt/etc/cron.d
 
-# Записываем новые строки расписания
+# Записываем новые строки расписания с полным путём к sh и логом
 > /opt/etc/cron.d/vpsmonitor
 echo "$CRON_LINES" | while read -r line; do
-    [ -n "$line" ] && echo "$line root /opt/etc/vpsmonitor-ui/vpsmonitor.sh > /dev/null 2>&1" >> /opt/etc/cron.d/vpsmonitor
+    [ -n "$line" ] && echo "$line root /opt/bin/sh /opt/etc/vpsmonitor-ui/vpsmonitor.sh >> /tmp/vpsmonitor_cron.log 2>&1" >> /opt/etc/cron.d/vpsmonitor
 done
-chmod 644 /opt/etc/cron.d/vpsmonitor
+# Пустая строка в конце — требование BusyBox cron
+echo "" >> /opt/etc/cron.d/vpsmonitor
+# Права 600 — обязательное требование BusyBox cron
+chmod 600 /opt/etc/cron.d/vpsmonitor
 
 # Перезапускаем cron, чтобы применить изменения
-/opt/etc/init.d/S10cron restart
+kill $(ps | grep cron | grep -v grep | awk '{print $1}') 2>/dev/null || true
+sleep 1
+/opt/etc/init.d/S10cron start
 
 # ---- Запуск веб-сервера ----
 echo -e "${GREEN}Запуск веб-сервера...${NC}"
@@ -1429,7 +1439,8 @@ echo "Запуск: /opt/etc/init.d/S99vpsmonitor start"
 echo "Статус: /opt/etc/init.d/S99vpsmonitor status"
 echo ""
 echo "Расписание cron: /opt/etc/cron.d/vpsmonitor"
-echo "Для изменения отредактируйте этот файл вручную."
+echo "Лог cron: /tmp/vpsmonitor_cron.log"
+echo "Для изменения расписания отредактируйте файл вручную."
 echo ""
 echo -e "${YELLOW}Пароли SSH хранятся в открытом виде в /opt/etc/vpsmonitor-ui/vpsmonitor.sh${NC}"
 echo "Рекомендуется: chmod 600 /opt/etc/vpsmonitor-ui/vpsmonitor.sh"
