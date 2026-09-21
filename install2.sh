@@ -4,115 +4,144 @@
 
 set +e
 
+# ---------- Самопроверка формата строк (защита от CRLF) ----------
+if [ -f "$0" ] && grep -q $'\r' "$0" 2>/dev/null; then
+    echo "Обнаружены Windows-символы (CRLF). Исправляем..."
+    sed -i 's/\r$//' "$0" 2>/dev/null
+    chmod +x "$0" 2>/dev/null
+    exec "$0" "$@"
+fi
+
+# ---------- Цвета ----------
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[0;33m'
 CYAN='\033[0;36m'
+MAGENTA='\033[0;35m'
+BLUE='\033[0;34m'
+WHITE='\033[1;37m'
 BOLD='\033[1m'
+DIM='\033[2m'
 NC='\033[0m'
 
-echo -e "${GREEN}${BOLD}╔════════════════════════════════════════════════╗${NC}"
-echo -e "${GREEN}${BOLD}║        VPSMonitor Installer  ·  v1.1          ║${NC}"
-echo -e "${GREEN}${BOLD}╚════════════════════════════════════════════════╝${NC}"
+line() { echo -e "${CYAN}${BOLD}  ─────────────────────────────────────────────────${NC}"; }
+section() {
+    echo ""
+    echo -e "${CYAN}${BOLD}  ┌─────────────────────────────────────────────────┐${NC}"
+    echo -e "${CYAN}${BOLD}  │${NC}  ${WHITE}${BOLD}$1${NC}"
+    echo -e "${CYAN}${BOLD}  └─────────────────────────────────────────────────┘${NC}"
+}
+
 echo ""
-echo -e "${CYAN}AWG 2.0 VPS Monitor – WebUI${NC}"
-echo "Веб-панель для мониторинга трафика WireGuard"
+echo -e "${GREEN}${BOLD}  ╔═══════════════════════════════════════════════════╗${NC}"
+echo -e "${GREEN}${BOLD}  ║                                                   ║${NC}"
+echo -e "${GREEN}${BOLD}  ║        🌍  ${WHITE}VPSMonitor Installer${GREEN}  ·  ${WHITE}v1.1${GREEN}          ║${NC}"
+echo -e "${GREEN}${BOLD}  ║                                                   ║${NC}"
+echo -e "${GREEN}${BOLD}  ╚═══════════════════════════════════════════════════╝${NC}"
 echo ""
-echo -e "${YELLOW}${BOLD}⚠  ВАЖНО:${NC}"
-echo -e "   Панель работает ${BOLD}только с VPS, на которых установлен AmneziaWG 2.0${NC}"
-echo "   (установщик install_amneziawg_en.sh от bivlked)."
-echo "   С другими реализациями WireGuard работа не гарантируется."
+echo -e "${MAGENTA}${BOLD}    AWG 2.0 VPS Monitor – WebUI${NC}"
+echo -e "${DIM}    Веб-панель для мониторинга трафика WireGuard${NC}"
+echo ""
+echo -e "${YELLOW}${BOLD}  ⚠  ВАЖНО:${NC}"
+echo -e "${YELLOW}     Панель работает только с VPS, на которых установлен${NC}"
+echo -e "${YELLOW}     ${BOLD}AmneziaWG 2.0${NC}${YELLOW} (установщик ${BOLD}install_amneziawg_en.sh${NC}${YELLOW}).${NC}"
+echo -e "${DIM}     С другими реализациями WireGuard работа не гарантируется.${NC}"
 echo ""
 
 if [ ! -d /opt ]; then
-    echo -e "${RED}Ошибка: /opt не найден. Убедитесь, что Entware установлен.${NC}"
+    echo -e "${RED}${BOLD}  ✗ Ошибка: /opt не найден.${NC}"
+    echo -e "${RED}     Убедитесь, что Entware установлен.${NC}"
     exit 1
 fi
 
-# ---------- ПРОВЕРКА ЗАВИСИМОСТЕЙ ----------
-echo -e "${YELLOW}[1/6] Проверка зависимостей...${NC}"
-echo "      Нужны: python3, expect, cron, dos2unix."
+# ---------- [1/6] ЗАВИСИМОСТИ ----------
+section "[1/6] Проверка зависимостей"
+echo -e "${DIM}     Нужны: python3, expect, cron, dos2unix${NC}"
 MISSING=""
 for pkg in python3 expect cron dos2unix; do
-    if ! opkg list-installed | grep -q "^$pkg"; then
+    if opkg list-installed | grep -q "^$pkg"; then
+        echo -e "${GREEN}     ✓${NC} $pkg"
+    else
+        echo -e "${YELLOW}     ○${NC} $pkg ${YELLOW}(не установлен)${NC}"
         MISSING="$MISSING $pkg"
     fi
 done
 
 if [ -n "$MISSING" ]; then
-    echo -e "${YELLOW}      Отсутствуют:$MISSING${NC}"
-    echo -n "      Установить их сейчас? (y/n) "
+    echo ""
+    echo -e "${YELLOW}     Отсутствуют:${BOLD}$MISSING${NC}"
+    echo -n "     Установить их сейчас? (y/n) "
     read -p "" -n 1 -r
     echo
     if [[ $REPLY =~ ^[Yy]$ ]]; then
         opkg update
         opkg install $MISSING
     else
-        echo -e "${RED}Установка отменена.${NC}"
+        echo -e "${RED}     Установка отменена.${NC}"
         exit 1
     fi
 fi
-echo -e "${GREEN}      ✓ Все зависимости на месте.${NC}"
-echo ""
+echo -e "${GREEN}     ✓ Все зависимости на месте.${NC}"
 
-# ---------- НАСТРОЙКА ВЕБ-ИНТЕРФЕЙСА ----------
-echo -e "${YELLOW}[2/6] Настройка веб-интерфейса${NC}"
-echo "      Порт, на котором будет доступна панель."
-echo -n "      Порт (по умолчанию 2000): "
+# ---------- [2/6] ПОРТ ПАНЕЛИ ----------
+section "[2/6] Настройка веб-интерфейса"
+echo -e "${DIM}     Порт, на котором будет доступна панель.${NC}"
+echo -n "     Порт (по умолчанию 2000): "
 read WEB_PORT
 WEB_PORT=${WEB_PORT:-2000}
-echo -e "${GREEN}      ✓ Порт: ${BOLD}$WEB_PORT${NC}"
-echo ""
+echo -e "${GREEN}     ✓ Порт: ${BOLD}$WEB_PORT${NC}"
 
-# ---------- НАСТРОЙКА СЕРВЕРОВ ----------
-echo -e "${YELLOW}[3/6] Настройка SSH-подключений к серверам WireGuard${NC}"
-echo "      Укажите параметры для доступа к вашим VPS."
-echo -n "      SSH порт (по умолчанию 22): "
+# ---------- [3/6] СЕРВЕРЫ ----------
+section "[3/6] Настройка SSH-подключений к серверам"
+echo -e "${DIM}     Укажите параметры для доступа к вашим VPS.${NC}"
+echo -n "     SSH порт (по умолчанию 22): "
 read SSH_PORT
 SSH_PORT=${SSH_PORT:-22}
-echo -n "      SSH пользователь (по умолчанию root): "
+echo -n "     SSH пользователь (по умолчанию root): "
 read SSH_USER
 SSH_USER=${SSH_USER:-root}
 echo ""
 
-read -p "      Сколько серверов вы хотите добавить? " SERVER_COUNT
+read -p "     Сколько серверов добавить? " SERVER_COUNT
 while ! [[ "$SERVER_COUNT" =~ ^[1-9][0-9]*$ ]]; do
-    echo -e "${RED}      Введите положительное число.${NC}"
-    read -p "      Количество серверов: " SERVER_COUNT
+    echo -e "${RED}     Введите положительное число.${NC}"
+    read -p "     Количество серверов: " SERVER_COUNT
 done
 
 for i in $(seq 1 $SERVER_COUNT); do
-    echo -e "      ${CYAN}--- Сервер $i ---${NC}"
-    read -p "      IP сервера или домен: " domain
+    echo ""
+    echo -e "${CYAN}     ┌─ Сервер $i ─────────────────────────────────${NC}"
+    read -p "     │ IP сервера или домен: " domain
     while [ -z "$domain" ]; do
-        echo -e "${RED}      Адрес не может быть пустым!${NC}"
-        read -p "      IP сервера или домен: " domain
+        echo -e "${RED}     │ Адрес не может быть пустым!${NC}"
+        read -p "     │ IP сервера или домен: " domain
     done
-    echo "      При вводе пароля символы не отображаются — это нормально."
-    read -sp "      Пароль SSH: " pass
+    echo -e "${DIM}     │ При вводе пароля символы не отображаются — это нормально.${NC}"
+    read -sp "     │ Пароль SSH: " pass
     echo
+    echo -e "${CYAN}     └────────────────────────────────────────────${NC}"
     eval "SERVER$i=\"$domain\""
     eval "PASS$i=\"$pass\""
 done
-echo ""
+echo -e "${GREEN}     ✓ Серверов добавлено: ${BOLD}$SERVER_COUNT${NC}"
 
-# ---------- ЧАСТОТА СБОРА ----------
-echo -e "${YELLOW}[4/6] Частота автоматического сбора статистики${NC}"
-echo "      Как часто опрашивать серверы:"
-echo -e "        1 — 1 раз в сутки        (03:00)"
-echo -e "        2 — 2 раза в сутки       (06:00, 18:00)  ${BOLD}← по умолчанию${NC}"
-echo -e "        3 — 3 раза в сутки       (00:00, 08:00, 16:00)"
-echo -e "        4 — 4 раза в сутки       (00:00, 06:00, 12:00, 18:00)"
-echo -e "        5 — 1 раз в неделю       (воскресенье 03:00)"
-echo -e "        6 — 3 раза в неделю      (пн, ср, пт 03:00)"
-echo -e "        7 — 1 раз в месяц        (1-е число 03:00)"
-echo -e "        8 — 2 раза в месяц       (1-е и 15-е 03:00)"
-echo -e "        9 — 3 раза в месяц       (1-е, 11-е, 21-е 03:00)"
-read -p "      Введите номер (1–9, Enter = 2): " FREQ
+# ---------- [4/6] РАСПИСАНИЕ ----------
+section "[4/6] Частота автоматического сбора"
+echo -e "     ${WHITE}1${NC} — 1 раз в сутки        ${DIM}(03:00)${NC}"
+echo -e "     ${WHITE}2${NC} — 2 раза в сутки       ${DIM}(06:00, 18:00)${NC}  ${GREEN}${BOLD}← по умолчанию${NC}"
+echo -e "     ${WHITE}3${NC} — 3 раза в сутки       ${DIM}(00:00, 08:00, 16:00)${NC}"
+echo -e "     ${WHITE}4${NC} — 4 раза в сутки       ${DIM}(00:00, 06:00, 12:00, 18:00)${NC}"
+echo -e "     ${WHITE}5${NC} — 1 раз в неделю       ${DIM}(воскресенье 03:00)${NC}"
+echo -e "     ${WHITE}6${NC} — 3 раза в неделю      ${DIM}(пн, ср, пт 03:00)${NC}"
+echo -e "     ${WHITE}7${NC} — 1 раз в месяц        ${DIM}(1-е число 03:00)${NC}"
+echo -e "     ${WHITE}8${NC} — 2 раза в месяц       ${DIM}(1-е и 15-е 03:00)${NC}"
+echo -e "     ${WHITE}9${NC} — 3 раза в месяц       ${DIM}(1-е, 11-е, 21-е 03:00)${NC}"
+echo ""
+read -p "     Введите номер (1–9, Enter = 2): " FREQ
 FREQ=${FREQ:-2}
 while ! [[ "$FREQ" =~ ^[1-9]$ ]]; do
-    echo -e "${RED}      Ошибка: введите число от 1 до 9.${NC}"
-    read -p "      Введите номер (1–9): " FREQ
+    echo -e "${RED}     Ошибка: введите число от 1 до 9.${NC}"
+    read -p "     Введите номер (1–9): " FREQ
 done
 
 CRON_LINES=""
@@ -149,22 +178,22 @@ case "$FREQ" in
     9) SCHEDULE_DESC="3 раза в месяц (1-е, 11-е, 21-е в 03:00)" ;;
 esac
 echo "$SCHEDULE_DESC" > /opt/etc/vpsmonitor-ui/schedule.conf
-echo -e "${GREEN}      ✓ Расписание: ${BOLD}$SCHEDULE_DESC${NC}"
-echo ""
+echo -e "${GREEN}     ✓ Расписание: ${BOLD}$SCHEDULE_DESC${NC}"
 
-# ---------- РОТАЦИЯ ФАЙЛОВ ----------
-echo -e "${YELLOW}[5/6] Ротация истории${NC}"
-echo "      Сколько последних снимков хранить для каждого сервера?"
-echo -e "        1 — 7 файлов"
-echo -e "        2 — 14 файлов  ${BOLD}← по умолчанию${NC}"
-echo -e "        3 — 30 файлов"
-echo -e "        4 — 60 файлов"
-echo -e "        5 — без ограничений"
-read -p "      Введите номер (1–5, Enter = 2): " ROT
+# ---------- [5/6] РОТАЦИЯ ----------
+section "[5/6] Ротация истории"
+echo -e "${DIM}     Сколько последних снимков хранить для каждого сервера?${NC}"
+echo -e "     ${WHITE}1${NC} — 7 файлов"
+echo -e "     ${WHITE}2${NC} — 14 файлов  ${GREEN}${BOLD}← по умолчанию${NC}"
+echo -e "     ${WHITE}3${NC} — 30 файлов"
+echo -e "     ${WHITE}4${NC} — 60 файлов"
+echo -e "     ${WHITE}5${NC} — без ограничений"
+echo ""
+read -p "     Введите номер (1–5, Enter = 2): " ROT
 ROT=${ROT:-2}
 while ! [[ "$ROT" =~ ^[1-5]$ ]]; do
-    echo -e "${RED}      Ошибка: введите число от 1 до 5.${NC}"
-    read -p "      Введите номер (1–5): " ROT
+    echo -e "${RED}     Ошибка: введите число от 1 до 5.${NC}"
+    read -p "     Введите номер (1–5): " ROT
 done
 case "$ROT" in
     1) ROTATION=7; ROTATION_DESC="7 файлов" ;;
@@ -174,15 +203,14 @@ case "$ROT" in
     5) ROTATION="unlimited"; ROTATION_DESC="без ограничений" ;;
 esac
 echo "$ROTATION_DESC" > /opt/etc/vpsmonitor-ui/rotation.conf
-echo -e "${GREEN}      ✓ Ротация: ${BOLD}$ROTATION_DESC${NC}"
-echo ""
+echo -e "${GREEN}     ✓ Ротация: ${BOLD}$ROTATION_DESC${NC}"
 
-# ---------- ОБРЕЗКА ВЫВОДА ----------
-echo -e "${YELLOW}[6/6] Обрезка вывода${NC}"
-echo "      В выводе команды статистики первые 8 строк — заголовок,"
-echo "      последняя строка — разделитель. Их можно убирать для компактности."
-echo -e "      ${CYAN}Рекомендуется: обрезать (да).${NC}"
-echo -n "      Обрезать вывод? (y/n, Enter = y): "
+# ---------- [6/6] ОБРЕЗКА ----------
+section "[6/6] Обрезка вывода"
+echo -e "${DIM}     Первые 8 строк — заголовок, последняя — разделитель.${NC}"
+echo -e "${DIM}     Их можно убирать для компактности.${NC}"
+echo -e "     ${CYAN}Рекомендуется: обрезать (да).${NC}"
+echo -n "     Обрезать вывод? (y/n, Enter = y): "
 read -p "" -n 1 -r TRIM
 echo
 if [[ $TRIM =~ ^[Nn]$ ]]; then
@@ -192,13 +220,14 @@ else
     echo "yes" > /opt/etc/vpsmonitor-ui/trim.conf
     TRIM_DESC="да"
 fi
-echo -e "${GREEN}      ✓ Обрезка: ${BOLD}$TRIM_DESC${NC}"
-echo ""
+echo -e "${GREEN}     ✓ Обрезка: ${BOLD}$TRIM_DESC${NC}"
 
-echo -e "${CYAN}Все данные собраны. Начинаю установку...${NC}"
+# ================= ГЕНЕРАЦИЯ =================
 echo ""
-
-# ================= ГЕНЕРАЦИЯ СКРИПТОВ =================
+line
+echo -e "${MAGENTA}${BOLD}     Сборка проекта...${NC}"
+line
+echo ""
 
 generate_collect_script() {
     cat > /opt/etc/vpsmonitor-ui/vpsmonitor.sh << EOF
@@ -266,9 +295,9 @@ EOF
 }
 
 generate_collect_script
+echo -e "${GREEN}     ✓${NC} Скрипт сбора: ${DIM}vpsmonitor.sh${NC}"
 
-# ================= ВЕБ-СЕРВЕР =================
-
+# ============ ВЕБ-СЕРВЕР ============
 cat > /opt/etc/vpsmonitor-ui/vpsmonitor.py << 'PYEOF'
 #!/opt/bin/python3
 import http.server
@@ -493,7 +522,7 @@ class StatsHandler(http.server.BaseHTTPRequestHandler):
             with open(CONFIG_FILE, 'w') as f:
                 f.write(content)
             os.chmod(CONFIG_FILE, 0o755)
-            self.send_json({'status': 'ok', 'message': 'Конфигурация восстановлена. Не забудьте перезапустить сервер.'})
+            self.send_json({'status': 'ok', 'message': 'Конфигурация восстановлена'})
         except Exception as e:
             self.send_json({'status': 'error', 'message': str(e)})
 
@@ -1235,9 +1264,9 @@ PYEOF
 sed -i "s/__WEB_PORT__/$WEB_PORT/g" /opt/etc/vpsmonitor-ui/vpsmonitor.py
 chmod +x /opt/etc/vpsmonitor-ui/vpsmonitor.py
 dos2unix /opt/etc/vpsmonitor-ui/vpsmonitor.py
+echo -e "${GREEN}     ✓${NC} Веб-сервер: ${DIM}vpsmonitor.py${NC}"
 
-# ================= INIT-СКРИПТ =================
-
+# ============ INIT-СКРИПТ ============
 cat > /opt/etc/init.d/S99vpsmonitor << 'EOF'
 #!/bin/sh
 NOHUP=$(command -v nohup)
@@ -1276,6 +1305,7 @@ EOF
 
 chmod +x /opt/etc/init.d/S99vpsmonitor
 dos2unix /opt/etc/init.d/S99vpsmonitor
+echo -e "${GREEN}     ✓${NC} Init-скрипт: ${DIM}S99vpsmonitor${NC}"
 
 RC_LOCAL="/opt/etc/init.d/rc.local"
 if [ -f "$RC_LOCAL" ]; then
@@ -1286,9 +1316,7 @@ else
     chmod +x "$RC_LOCAL"
 fi
 
-# ================= CRON =================
-
-echo -e "${YELLOW}Настройка cron...${NC}"
+# ============ CRON ============
 /opt/etc/init.d/S10cron start 2>/dev/null || true
 (crontab -l 2>/dev/null | grep -v vpsmonitor.sh | crontab -) 2>/dev/null || true
 rm -f /opt/etc/cron.d/vpsmonitor
@@ -1304,41 +1332,46 @@ chmod 600 /opt/etc/cron.d/vpsmonitor
 kill $(ps | grep cron | grep -v grep | awk '{print $1}') 2>/dev/null || true
 sleep 1
 /opt/etc/init.d/S10cron start
+echo -e "${GREEN}     ✓${NC} Cron: ${DIM}/opt/etc/cron.d/vpsmonitor${NC}"
 
-# ================= ЗАПУСК =================
-
-echo -e "${YELLOW}Запуск веб-сервера...${NC}"
+# ============ ЗАПУСК ============
 /opt/etc/init.d/S99vpsmonitor stop 2>/dev/null || true
-/opt/etc/init.d/S99vpsmonitor start
-
-echo -e "${YELLOW}Запуск первичного сбора статистики...${NC}"
+/opt/etc/init.d/S99vpsmonitor start > /dev/null 2>&1
+echo -e "${GREEN}     ✓${NC} Веб-сервер запущен"
 /opt/etc/vpsmonitor-ui/vpsmonitor.sh > /dev/null 2>&1 &
+echo -e "${GREEN}     ✓${NC} Первичный сбор данных запущен"
+echo ""
 
+# ============ ФИНАЛЬНАЯ СВОДКА ============
+echo -e "${GREEN}${BOLD}  ╔═══════════════════════════════════════════════════╗${NC}"
+echo -e "${GREEN}${BOLD}  ║          ✓  Установка завершена успешно!          ║${NC}"
+echo -e "${GREEN}${BOLD}  ╚═══════════════════════════════════════════════════╝${NC}"
 echo ""
-echo -e "${GREEN}${BOLD}╔════════════════════════════════════════════════╗${NC}"
-echo -e "${GREEN}${BOLD}║          Установка завершена!  ✓              ║${NC}"
-echo -e "${GREEN}${BOLD}╚════════════════════════════════════════════════╝${NC}"
+echo -e "${MAGENTA}${BOLD}  🌐 Откройте панель в браузере:${NC}"
+echo -e "     ${WHITE}${BOLD}http://192.168.1.1:$WEB_PORT/${NC}"
 echo ""
-echo -e "${CYAN}Откройте панель в браузере:${NC}"
-echo -e "   ${BOLD}http://192.168.1.1:$WEB_PORT/${NC}"
+echo -e "${CYAN}${BOLD}  ⚙  Выбранные настройки:${NC}"
+echo -e "     ${DIM}Расписание:${NC}  ${BOLD}$SCHEDULE_DESC${NC}"
+echo -e "     ${DIM}Ротация:   ${NC}  ${BOLD}$ROTATION_DESC${NC}"
+echo -e "     ${DIM}Обрезка:   ${NC}  ${BOLD}$TRIM_DESC${NC}"
 echo ""
-echo -e "${CYAN}Настройки, выбранные при установке:${NC}"
-echo "   Расписание:   $SCHEDULE_DESC"
-echo "   Ротация:      $ROTATION_DESC"
-echo "   Обрезка:      $TRIM_DESC"
+echo -e "${CYAN}${BOLD}  🛠  Управление сервисом:${NC}"
+echo -e "     ${DIM}Статус:      ${NC} /opt/etc/init.d/S99vpsmonitor status"
+echo -e "     ${DIM}Остановка:   ${NC} /opt/etc/init.d/S99vpsmonitor stop"
+echo -e "     ${DIM}Запуск:      ${NC} /opt/etc/init.d/S99vpsmonitor start"
+echo -e "     ${DIM}Перезапуск:  ${NC} /opt/etc/init.d/S99vpsmonitor restart"
 echo ""
-echo -e "${CYAN}Полезные команды:${NC}"
-echo "   Статус:       /opt/etc/init.d/S99vpsmonitor status"
-echo "   Остановка:    /opt/etc/init.d/S99vpsmonitor stop"
-echo "   Запуск:       /opt/etc/init.d/S99vpsmonitor start"
-echo "   Перезапуск:   /opt/etc/init.d/S99vpsmonitor restart"
+echo -e "${CYAN}${BOLD}  ✏  Правка списка серверов:${NC}"
+echo -e "     ${DIM}Файл:     ${NC} /opt/etc/vpsmonitor-ui/vpsmonitor.sh"
+echo -e "     ${DIM}Применить:${NC} /opt/etc/init.d/S99vpsmonitor restart"
 echo ""
-echo -e "${CYAN}Для управления серверами:${NC}"
-echo "   Откройте: /opt/etc/vpsmonitor-ui/vpsmonitor.sh"
-echo "   После правок: /opt/etc/init.d/S99vpsmonitor restart"
+echo -e "${YELLOW}${BOLD}  ⚠  Пароли SSH хранятся в открытом виде.${NC}"
+echo -e "${YELLOW}     Рекомендуется: chmod 600 /opt/etc/vpsmonitor-ui/vpsmonitor.sh${NC}"
 echo ""
-echo -e "${YELLOW}⚠  Пароли SSH хранятся в открытом виде.${NC}"
-echo -e "${YELLOW}   Рекомендуется: chmod 600 /opt/etc/vpsmonitor-ui/vpsmonitor.sh${NC}"
+line
+echo -e "${DIM}     Спасибо, что выбрали VPSMonitor!${NC}"
+echo -e "${DIM}     github.com/romaca4/vpsmonitor-ui${NC}"
+line
 echo ""
 
 exit 0
